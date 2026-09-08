@@ -1,7 +1,6 @@
 use easy_rpc::bridge_hyper::HyperClient;
 use easy_rpc::protocol::{Transport, encode, decode};
 use easy_rpc::easyrpc::conformance::v1::{EchoRequest, EchoResponse};
-use hex::encode as hexenc;
 
 #[tokio::test]
 async fn echo_unary() {
@@ -13,9 +12,16 @@ async fn echo_unary() {
         body: Some(encode(&EchoRequest { input: "hi".to_string() })),
     };
     let res = c.send(req).await.expect("send");
-    eprintln!("status={} body_hex={}", res.status, hexenc(&res.body));
-    match decode::<EchoResponse>(&res.body) {
-        Ok(out) => assert_eq!(out.output, "echo:hi"),
-        Err(e) => panic!("decode failed: {e}"),
-    }
+    let out: EchoResponse = decode(&res.body).expect("decode");
+    assert_eq!(out.output, "echo:hi");
+}
+
+#[tokio::test]
+async fn server_registry_ok() {
+    use easy_rpc::protocol::{ServerRegistry, MethodSpec};
+    let reg = ServerRegistry { unary: Default::default(), stream: Default::default() };
+    let specs = easy_rpc::easyrpc::conformance::v1::method_specs();
+    assert_eq!(specs.len(), 4);
+    assert!(specs.iter().any(|s: &MethodSpec| s.server_stream));
+    let _ = reg;
 }
