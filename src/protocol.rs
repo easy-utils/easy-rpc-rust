@@ -156,10 +156,15 @@ pub async fn hyper_serve(
     let uri = req.uri().clone();
     let path = uri.path();
     let method = req.method().clone();
+    let req_headers = req.headers().clone();
     let body = { use http_body_util::BodyExt; req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default() };
+    let mut req_headers2 = Headers::new();
+    if let Some(ct) = req_headers.get("content-type") {
+        req_headers2.insert("content-type".to_string(), vec![ct.to_str().unwrap_or("").to_string()]);
+    }
     let req2 = Request {
         url: uri.to_string(), method: method.to_string(),
-        headers: Headers::new(), body: Some(bytes::Bytes::copy_from_slice(&body)),
+        headers: req_headers2, body: Some(bytes::Bytes::copy_from_slice(&body)),
     };
     let kind = content_kind(&req2);
     let spec = methods.iter().find(|m| m.path == path);

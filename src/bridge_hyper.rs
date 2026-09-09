@@ -29,10 +29,11 @@ impl Transport for HyperClient {
         tokio::spawn(async move {
             let _ = conn2.await;
         });
+        let target = origin_form(&req.url);
         let body = Full::new(req.body.unwrap_or_default());
         let hreq = HReq::builder()
             .method(req.method.as_str())
-            .uri(req.url.as_str())
+            .uri(target.as_str())
             .header("host", host_of(&req.url))
             .header("content-type", "application/proto")
             .body(body)
@@ -49,10 +50,11 @@ impl Transport for HyperClient {
         tokio::spawn(async move {
             let _ = conn2.await;
         });
+        let target = origin_form(&req.url);
         let body = Full::new(req.body.unwrap_or_default());
         let hreq = HReq::builder()
             .method(req.method.as_str())
-            .uri(req.url.as_str())
+            .uri(target.as_str())
             .header("host", host_of(&req.url))
             .header("content-type", "application/proto")
             .body(body)
@@ -100,6 +102,12 @@ impl Stream for HyperStream {
 
 fn host_of(url: &str) -> String {
     url.parse::<http::Uri>().ok().and_then(|u| u.host().map(str::to_string)).unwrap_or_default()
+}
+
+fn origin_form(url: &str) -> String {
+    url.parse::<http::Uri>().ok()
+        .map(|u| u.path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_else(|| "/".to_string()))
+        .unwrap_or_else(|| url.to_string())
 }
 
 fn err_box(e: String) -> RPCError {

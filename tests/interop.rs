@@ -4,7 +4,8 @@ use easy_rpc::easyrpc::conformance::v1::{EchoRequest, EchoResponse};
 
 #[tokio::test]
 async fn echo_unary() {
-    let c = HyperClient::new("http://127.0.0.1:18888".to_string());
+    let base = std::env::var("EASY_RPC_BASE").unwrap_or_else(|_| "http://127.0.0.1:18888".to_string());
+    let c = HyperClient::new(base);
     let req = easy_rpc::protocol::Request {
         url: c.url("/v1/echo"),
         method: "POST".to_string(),
