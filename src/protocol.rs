@@ -56,15 +56,23 @@ pub trait Transport: Send + Sync {
 // ---- connect code mapping ----
 pub fn http_status(code: i32) -> u16 {
     match code {
+        1 => 499,
         3 => 400,
+        4 => 504,
         5 => 404,
+        6 => 409,
         7 => 403,
         8 => 429,
-        16 => 401,
+        9 => 400,
+        10 => 409,
+        11 => 400,
+        12 => 501,
         14 => 503,
+        16 => 401,
         _ => 500,
     }
 }
+
 pub fn connect_from_status(status: u16) -> i32 {
     match status {
         400 => 3,
@@ -73,10 +81,13 @@ pub fn connect_from_status(status: u16) -> i32 {
         401 => 16,
         429 => 8,
         503 => 14,
+        409 => 10,
+        504 => 4,
+        501 => 12,
+        499 => 1,
         _ => 13,
     }
 }
-
 // ---- framing ----
 const FLAG_COMPRESSED: u8 = 0x01;
 const FLAG_END_STREAM: u8 = 0x02;
