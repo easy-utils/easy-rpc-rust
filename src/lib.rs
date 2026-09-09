@@ -1,5 +1,6 @@
 pub mod protocol;
 pub mod bridge_hyper;
+pub mod bridge_reqwest;
 pub mod google {
     pub mod api {
         include!("google/api/google.api.rs");

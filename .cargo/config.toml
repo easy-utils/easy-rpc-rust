@@ -1,0 +1,4 @@
+[build]
+# reqwest gates its http3 feature behind --cfg reqwest_unstable. Forward it when
+# our own `h3` feature is enabled so plain `cargo build` works for the full build.
+rustflags = ["--cfg", "reqwest_unstable"]

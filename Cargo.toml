@@ -3,11 +3,19 @@ name = "easy-rpc"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["h3"]
+# h1h2: minimal-dependency build. reqwest without http3 feature (no quinn).
+h1h2 = ["dep:reqwest"]
+# h3: full build. Adds reqwest with its http3 feature (quinn + h3-quinn).
+# NewClient auto-negotiates h3 -> h2 -> h1.
+h3 = ["dep:reqwest", "reqwest/http3", "reqwest/stream"]
+
 [dependencies]
 prost = "0.13"
 prost-types = "0.13"
 tokio = { version = "1", features = ["full"] }
-hyper = { version = "1", features = ["client", "server", "http1", "http2"] }
+hyper = { version = "1", features = ["server", "http1", "http2"] }
 http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "server-graceful"] }
 http = "1"
@@ -17,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bytes = "1"
 async-trait = "0.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "stream"], optional = true }
+futures = { version = "0.3.34", default-features = false }
 
 [build-dependencies]
 tonic-build = "0.12"
