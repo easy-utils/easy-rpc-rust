@@ -15,7 +15,8 @@ use axum::Router;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 
-use crate::protocol::{ServerRegistry, MethodSpec, Headers};
+use crate::protocol::{MethodSpec, Headers};
+use crate::server::ServerRegistry;
 use crate::dispatch::{handle, RequestContext};
 
 /// Build an axum Router for the given method specs + registry. Nest or merge it

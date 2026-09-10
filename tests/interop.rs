@@ -38,7 +38,8 @@ async fn count_stream_reqwest() {
 
 #[tokio::test]
 async fn server_registry_ok() {
-    use easy_rpc::protocol::{ServerRegistry, MethodSpec};
+    use easy_rpc::server::ServerRegistry;
+    use easy_rpc::protocol::MethodSpec;
     let reg = ServerRegistry { unary: Default::default(), stream: Default::default() };
     let specs = easy_rpc::easyrpc::conformance::v1::method_specs();
     assert_eq!(specs.len(), 4);

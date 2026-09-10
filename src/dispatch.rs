@@ -7,7 +7,8 @@
 use bytes::Bytes;
 use std::collections::BTreeMap;
 
-use crate::protocol::{Request, Response, ServerRegistry, MethodSpec, RPCError, frame, http_status};
+use crate::protocol::{Request, Response, MethodSpec, RPCError, frame, http_status};
+use crate::server::ServerRegistry;
 
 /// Resolve a response for an RPC request. Async because server-stream handlers
 /// may await; unary is sync inside.

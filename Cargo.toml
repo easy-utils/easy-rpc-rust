@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["h3"]
+default = ["h3", "server"]
 # h1h2: minimal-dependency build. reqwest without http3 feature (no quinn).
 h1h2 = ["dep:reqwest"]
 # h3: full build. Adds reqwest with its http3 feature (quinn + h3-quinn).
 # NewClient auto-negotiates h3 -> h2 -> h1.
 h3 = ["dep:reqwest", "reqwest/http3", "reqwest/stream"]
-axum = ["dep:axum"]
+axum = ["dep:axum", "server"]
+# server: HTTP server surface (dispatch + hyper/axum adapters). Off for
+# client-only builds so no server runtime is linked.
+server = []
 
 [dependencies]
 prost = "0.13"
@@ -32,3 +35,8 @@ axum = { version = "0.8.9", optional = true }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[[bin]]
+name = "conformance_server"
+path = "src/bin/conformance_server.rs"
+required-features = ["server"]

@@ -1,7 +1,7 @@
 // easy-rpc Rust conformance server entry (hyper). Serves HTTP/1 + h2c (and h2)
 // over the same port via hyper-util's auto connection builder, which accepts
 // both HTTP/1 and HTTP/2 (cleartext prior-knowledge) on one listener.
-use easy_rpc::protocol::{hyper_serve, ServerRegistry};
+use easy_rpc::server::{hyper_serve, ServerRegistry};
 use easy_rpc::easyrpc::conformance::v1::method_specs;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioExecutor};
@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn build_registry() -> ServerRegistry {
     use easy_rpc::protocol::{encode, RPCError};
+    use easy_rpc::server::{UnaryHandler, StreamHandler};
     use easy_rpc::easyrpc::conformance::v1::*;
     let mut unary = std::collections::HashMap::new();
     unary.insert("Health".to_string(), Box::new(
@@ -51,7 +52,7 @@ fn build_registry() -> ServerRegistry {
             } else {
                 Ok(encode(&HealthResponse { ok: true, name: "conformance".to_string() }).to_vec())
             }
-        }) as easy_rpc::protocol::UnaryHandler);
+        }) as easy_rpc::server::UnaryHandler);
     unary.insert("Echo".to_string(), Box::new(
         move |req: Vec<u8>, kind: String| -> Result<Vec<u8>, RPCError> {
             if kind == "json" {
@@ -62,7 +63,7 @@ fn build_registry() -> ServerRegistry {
                 let m: EchoRequest = easy_rpc::protocol::decode(&req).map_err(|e| RPCError { code: 13, message: e.to_string() })?;
                 Ok(encode(&EchoResponse { output: format!("echo:{}", m.input) }).to_vec())
             }
-        }) as easy_rpc::protocol::UnaryHandler);
+        }) as easy_rpc::server::UnaryHandler);
     unary.insert("Fail".to_string(), Box::new(
         move |req: Vec<u8>, kind: String| -> Result<Vec<u8>, RPCError> {
             if kind == "json" {
@@ -73,7 +74,7 @@ fn build_registry() -> ServerRegistry {
                 let m: FailRequest = easy_rpc::protocol::decode(&req).map_err(|e| RPCError { code: 13, message: e.to_string() })?;
                 Ok(encode(&FailResponse { ok: m.message.is_empty() }).to_vec())
             }
-        }) as easy_rpc::protocol::UnaryHandler);
+        }) as easy_rpc::server::UnaryHandler);
     let mut stream = std::collections::HashMap::new();
     stream.insert("Count".to_string(), Box::new(
         move |_req: Vec<u8>, kind: String, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
@@ -85,6 +86,6 @@ fn build_registry() -> ServerRegistry {
                 }
             }
             Ok(())
-        }) as easy_rpc::protocol::StreamHandler);
+        }) as easy_rpc::server::StreamHandler);
     ServerRegistry { unary, stream }
 }
