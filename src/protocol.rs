@@ -100,6 +100,17 @@ pub fn frame(payload: &[u8], end_stream: bool) -> Vec<u8> {
     out
 }
 
+/// Encode an error into a stream END-frame payload (`<code byte>\\0<message>`),
+/// matching the Go/TS/Python encoders. Clients that understand it surface the
+/// error; clients that don't still see a clean END.
+pub fn encode_end_stream(code: i32, message: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 + message.len());
+    out.push((code & 0xff) as u8);
+    out.push(0);
+    out.extend_from_slice(message.as_bytes());
+    out
+}
+
 /// Decode one frame from a byte buffer, returning (payload, end, consumed).
 pub fn read_frame(buf: &[u8]) -> Option<(Vec<u8>, bool, usize)> {
     if buf.len() < 5 {

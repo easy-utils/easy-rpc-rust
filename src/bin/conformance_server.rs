@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 #[derive(Clone)]
 struct Ctx {
     reg: std::sync::Arc<ServerRegistry>,
-    methods: Vec<easy_rpc::protocol::MethodSpec>,
+    methods: std::sync::Arc<Vec<easy_rpc::protocol::MethodSpec>>,
 }
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(18888);
     let methods = method_specs();
     let reg = build_registry();
-    let ctx = Ctx { reg: std::sync::Arc::new(reg), methods };
+    let ctx = Ctx { reg: std::sync::Arc::new(reg), methods: std::sync::Arc::new(methods) };
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     println!("rust on {}", port);
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let builder = auto::Builder::new(TokioExecutor::new());
             let service = service_fn(move |req| {
                 let ctx = ctx.clone();
-                async move { hyper_serve(&ctx.methods, &ctx.reg, req).await }
+                async move { hyper_serve(ctx.methods.clone(), ctx.reg.clone(), req).await }
             });
             if let Err(e) = builder.serve_connection(io, service).await {
                 eprintln!("conn err: {}", e);
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn build_registry() -> ServerRegistry {
     use easy_rpc::protocol::{encode, RPCError};
-    use easy_rpc::server::{UnaryHandler, StreamHandler};
+    use easy_rpc::server::StreamHandler;
     use easy_rpc::easyrpc::conformance::v1::*;
     let mut unary = std::collections::HashMap::new();
     unary.insert("Health".to_string(), Box::new(

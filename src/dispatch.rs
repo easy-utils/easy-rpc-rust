@@ -1,59 +1,100 @@
 //! ASGI-style pure server dispatch for easy-rpc.
 //!
-//! `dispatch` is the protocol-agnostic application: it maps a core
-//! `Request` to a core `Response` given method specs + a service registry.
-//! It never imports an HTTP runtime. Backends (hyper, axum, warp, a custom
-//! server, ...) only adapt `Request <-> Response` by calling `Handle`.
-use bytes::Bytes;
-use std::collections::BTreeMap;
-
-use crate::protocol::{Request, Response, MethodSpec, RPCError, frame, http_status};
+//! `handle` is the protocol-agnostic application: it maps a core `Request` into
+//! a push-based `ResponseWriter` given method specs + a service registry. It
+//! never imports an HTTP runtime. Backends (hyper, axum, warp, a custom server,
+//! ...) implement `ResponseWriter` for their transport.
+//!
+//! Server-stream is written frame-by-frame: the adapter flushes each frame, so
+//! responses are truly incremental — never buffered.
+use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, frame, http_status};
 use crate::server::ServerRegistry;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
-/// Resolve a response for an RPC request. Async because server-stream handlers
-/// may await; unary is sync inside.
+/// Push-based server sink. Adapters implement this for their transport.
+pub trait ResponseWriter: Send + Sync {
+    /// Set the HTTP status (called before the first `write_frame`).
+    fn status(&self, code: u16);
+    /// Set response headers (called before the first `write_frame`).
+    fn header(&self, headers: Headers);
+    /// Write one payload: an already-framed stream frame (or the unary body).
+    fn write_frame(&self, payload: Vec<u8>) -> Result<(), RPCError>;
+}
+
+/// Resolve an RPC request, pushing the response into `w`.
 pub async fn handle(
     _ctx: &RequestContext,
     req: Request,
     methods: &[MethodSpec],
     reg: &ServerRegistry,
-) -> Response {
+    w: Arc<dyn ResponseWriter>,
+) {
     let path = req.url.split('?').next().unwrap_or("").to_string();
     let kind = content_kind_headers(&req.headers);
     let ct = if kind == "json" { "application/json" } else { "application/proto" };
 
     let spec = methods.iter().find(|m| m.path == path);
     let Some(spec) = spec else {
-        return err_response(&RPCError { code: 5, message: "not found".into() });
+        return write_error(w.as_ref(), &RPCError { code: 5, message: "not found".into() });
     };
 
     if spec.server_stream {
         let Some(h) = reg.stream.get(&spec.name) else {
-            return err_response(&RPCError { code: 5, message: "method not found".into() });
+            return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into() });
         };
-        let payloads = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
-        let f = payloads.clone();
-        let emit = Box::new(move |p: Vec<u8>| -> Result<(), RPCError> { f.lock().unwrap().push(p); Ok(()) });
-        let _ = h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), emit);
-        let mut out = Vec::new();
-        for p in payloads.lock().unwrap().iter() { out.extend_from_slice(&frame(p, false)); }
-        out.extend_from_slice(&frame(&[], true));
+        // Connect semantics: stream is always HTTP 200; failures ride the END frame.
+        w.status(200);
         let mut headers = BTreeMap::new();
-        headers.insert("content-type".to_string(), vec![if kind == "json" { "application/connect+json" } else { "application/connect+proto" }.to_string()]);
-        return Response { status: 200, headers, body: Bytes::from(out), error: None };
+        headers.insert(
+            "content-type".to_string(),
+            vec![if kind == "json" { "application/connect+json" } else { "application/connect+proto" }.to_string()],
+        );
+        w.header(headers);
+        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let end_flag = ended.clone();
+        let wc = w.clone();
+        let emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync> = Box::new(move |p: Vec<u8>| {
+            if end_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(());
+            }
+            wc.write_frame(frame(&p, false))
+        });
+        let result = h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), emit);
+        if ended.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        if let Err(e) = result {
+            ended.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = w.write_frame(frame(&encode_end_stream(e.code, &e.message), true));
+            return;
+        }
+        ended.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = w.write_frame(frame(&[], true));
+        return;
     }
 
     let Some(h) = reg.unary.get(&spec.name) else {
-        return err_response(&RPCError { code: 5, message: "method not found".into() });
+        return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into() });
     };
     match h(req.body.clone().unwrap_or_default().to_vec(), kind.clone()) {
         Ok(out) => {
+            w.status(200);
             let mut headers = BTreeMap::new();
             headers.insert("content-type".to_string(), vec![ct.to_string()]);
-            Response { status: 200, headers, body: Bytes::from(out), error: None }
+            w.header(headers);
+            let _ = w.write_frame(out);
         }
-        Err(e) => err_response(&e),
+        Err(e) => write_error(w.as_ref(), &e),
     }
+}
+
+fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
+    w.status(http_status(e.code));
+    let mut headers = BTreeMap::new();
+    headers.insert("content-type".to_string(), vec!["text/plain".to_string()]);
+    w.header(headers);
+    let _ = w.write_frame(e.message.clone().into_bytes());
 }
 
 /// Minimal request context (headers). User-defined middleware can enrich this;
@@ -79,17 +120,3 @@ fn content_kind_headers(h: &crate::protocol::Headers) -> String {
     }
     "proto".to_string()
 }
-
-fn err_response(e: &RPCError) -> Response {
-    let mut headers = BTreeMap::new();
-    headers.insert("content-type".to_string(), vec!["text/plain".to_string()]);
-    Response {
-        status: http_status(e.code),
-        headers,
-        body: Bytes::from(e.message.clone().into_bytes()),
-        error: Some(e.clone()),
-    }
-}
-
-#[allow(dead_code)]
-fn _unused(u: u16) { let _ = u; }
