@@ -64,7 +64,7 @@ impl Transport for HyperClient {
         if parts.status.as_u16() >= 300 {
             return Err(RPCError { code: connect_from_status(parts.status.as_u16()), message: "http error".to_string() });
         }
-        Ok(Box::new(HyperStream { incoming }))
+        Ok(Box::new(HyperStream { incoming, err: None }))
     }
 }
 
@@ -78,7 +78,7 @@ async fn connect(url: &str) -> Result<(http1::SendRequest<Full<Bytes>>, http1::C
     http1::handshake(io).await.map_err(|e| err_box(e.to_string()))
 }
 
-struct HyperStream { incoming: Incoming }
+struct HyperStream { incoming: Incoming, err: Option<RPCError> }
 #[async_trait::async_trait]
 impl Stream for HyperStream {
     async fn recv(&mut self) -> Option<Bytes> {
@@ -88,7 +88,11 @@ impl Stream for HyperStream {
                 Some(Ok(f)) => {
                     let chunk = f.into_data().ok()?;
                     if let Some((payload, end, _)) = read_frame(&chunk) {
-                        if end { return None; }
+                        if end {
+                            let (code, message) = crate::protocol::decode_end_stream(&payload);
+                            if code != 0 { self.err = Some(RPCError { code, message }); }
+                            return None;
+                        }
                         return Some(Bytes::from(payload));
                     }
                 }
@@ -96,6 +100,7 @@ impl Stream for HyperStream {
             }
         }
     }
+    fn last_error(&self) -> Option<RPCError> { self.err.clone() }
     fn cancel(&mut self) {}
     fn close(&mut self) {}
 }

@@ -41,6 +41,8 @@ impl std::fmt::Display for RPCError {
 pub trait Stream: Send {
     /// Next raw (de-framed) message; None at end.
     async fn recv(&mut self) -> Option<Bytes>;
+    /// Set when the stream ended with a Connect end-stream error.
+    fn last_error(&self) -> Option<RPCError> { None }
     fn cancel(&mut self);
     fn close(&mut self);
 }
@@ -100,15 +102,70 @@ pub fn frame(payload: &[u8], end_stream: bool) -> Vec<u8> {
     out
 }
 
-/// Encode an error into a stream END-frame payload (`<code byte>\\0<message>`),
-/// matching the Go/TS/Python encoders. Clients that understand it surface the
-/// error; clients that don't still see a clean END.
+/// Connect code -> stable lowercase wire name.
+pub fn code_to_string(code: i32) -> &'static str {
+    match code {
+        0 => "ok", 1 => "canceled", 2 => "unknown", 3 => "invalid_argument",
+        4 => "deadline_exceeded", 5 => "not_found", 6 => "already_exists",
+        7 => "permission_denied", 8 => "resource_exhausted", 9 => "failed_precondition",
+        10 => "aborted", 11 => "out_of_range", 12 => "unimplemented", 13 => "internal",
+        14 => "unavailable", 15 => "data_loss", 16 => "unauthenticated",
+        _ => "unknown",
+    }
+}
+
+/// Wire code name -> Connect code (unknown -> 2).
+pub fn code_from_string(name: &str) -> i32 {
+    match name {
+        "ok" => 0, "canceled" => 1, "unknown" => 2, "invalid_argument" => 3,
+        "deadline_exceeded" => 4, "not_found" => 5, "already_exists" => 6,
+        "permission_denied" => 7, "resource_exhausted" => 8,
+        "failed_precondition" => 9, "aborted" => 10, "out_of_range" => 11,
+        "unimplemented" => 12, "internal" => 13, "unavailable" => 14,
+        "data_loss" => 15, "unauthenticated" => 16,
+        _ => 2,
+    }
+}
+
+/// Encode an END-frame payload in the Connect end-stream JSON shape:
+/// `{"error":{"code":"<name>","message":"..."}}`; a clean end is empty.
 pub fn encode_end_stream(code: i32, message: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(2 + message.len());
-    out.push((code & 0xff) as u8);
-    out.push(0);
-    out.extend_from_slice(message.as_bytes());
-    out
+    if code == 0 {
+        return Vec::new();
+    }
+    let esc = message.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("{{\"error\":{{\"code\":\"{}\",\"message\":\"{}\"}}}}", code_to_string(code), esc).into_bytes()
+}
+
+/// Decode a Connect end-stream payload. `(0, "")` = clean end.
+pub fn decode_end_stream(payload: &[u8]) -> (i32, String) {
+    if payload.is_empty() {
+        return (0, String::new());
+    }
+    let s = match std::str::from_utf8(payload) { Ok(s) => s, Err(_) => return (0, String::new()) };
+    // Minimal parse: pull the "code" and "message" string values.
+    let code = extract_json_str(s, "code").map(|c| code_from_string(&c)).unwrap_or(2);
+    let message = extract_json_str(s, "message").unwrap_or_default();
+    (code, message)
+}
+
+fn extract_json_str(s: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let i = s.find(&needle)? + needle.len();
+    let rest = &s[i..];
+    let colon = rest.find(':')? + 1;
+    let after = rest[colon..].trim_start();
+    let after = after.strip_prefix('"')?;
+    let mut out = String::new();
+    let mut chars = after.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => { if let Some(n) = chars.next() { out.push(n); } }
+            _ => out.push(c),
+        }
+    }
+    Some(out)
 }
 
 /// Decode one frame from a byte buffer, returning (payload, end, consumed).
