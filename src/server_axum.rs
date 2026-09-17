@@ -48,7 +48,7 @@ impl ResponseWriter for ChannelWriter {
     fn write_frame(&self, payload: Vec<u8>) -> Result<(), RPCError> {
         self.tx
             .send(Ok(BodyFrame::data(Bytes::from(payload))))
-            .map_err(|e| RPCError { code: 13, message: e.to_string() })
+            .map_err(|e| RPCError { code: 13, message: e.to_string(), ..Default::default() })
     }
 }
 

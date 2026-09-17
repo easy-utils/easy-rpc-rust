@@ -15,8 +15,8 @@ use hyper::body::Frame as BodyFrame;
 use std::sync::Arc;
 
 // ---- server-side (hyper) ----
-pub type UnaryHandler = Box<dyn Fn(Vec<u8>, String) -> Result<Vec<u8>, RPCError> + Send + Sync>;
-pub type StreamHandler = Box<dyn Fn(Vec<u8>, String, Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>) -> Result<(), RPCError> + Send + Sync>;
+pub type UnaryHandler = Box<dyn Fn(Vec<u8>, String, &Headers) -> Result<Vec<u8>, RPCError> + Send + Sync>;
+pub type StreamHandler = Box<dyn Fn(Vec<u8>, String, &Headers, Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>) -> Result<(), RPCError> + Send + Sync>;
 
 pub struct ServerRegistry {
     pub unary: std::collections::HashMap<String, UnaryHandler>,
@@ -48,7 +48,7 @@ impl ResponseWriter for ChannelWriter {
     fn write_frame(&self, payload: Vec<u8>) -> Result<(), RPCError> {
         self.tx
             .send(Ok(BodyFrame::data(Bytes::from(payload))))
-            .map_err(|e| RPCError { code: 13, message: e.to_string() })
+            .map_err(|e| RPCError { code: 13, message: e.to_string(), ..Default::default() })
     }
 }
 
@@ -65,9 +65,13 @@ pub async fn hyper_serve(
     let method = req.method().clone();
     let req_headers = req.headers().clone();
     let body = { use http_body_util::BodyExt; req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default() };
+    // All request headers are forwarded (lowercased, like hyper's HeaderMap):
+    // handlers read auth/metadata via the Headers argument.
     let mut req_headers2 = Headers::new();
-    if let Some(ct) = req_headers.get("content-type") {
-        req_headers2.insert("content-type".to_string(), vec![ct.to_str().unwrap_or("").to_string()]);
+    for (name, value) in req_headers.iter() {
+        let k = name.as_str().to_ascii_lowercase();
+        let v = value.to_str().unwrap_or("").to_string();
+        req_headers2.entry(k).or_default().push(v);
     }
     let req2 = Request {
         url: uri.to_string(), method: method.to_string(),

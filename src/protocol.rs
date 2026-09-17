@@ -24,11 +24,35 @@ pub struct Response {
     pub error: Option<RPCError>,
 }
 
+/// A structured error detail (spec §4.1, aligned with Connect Error Details /
+/// gRPC google.rpc status details). `type_` is the wire "type" (a type URL);
+/// `value` is opaque bytes (typically an encoded protobuf message).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ErrorDetail {
+    pub type_: String,
+    pub value: Vec<u8>,
+}
+
 /// Wire-level error with a Connect code.
 #[derive(Clone, Debug)]
 pub struct RPCError {
     pub code: i32,
     pub message: String,
+    /// Optional structured details (spec §4.1); opaque to the wire layer.
+    pub details: Vec<ErrorDetail>,
+}
+impl Default for RPCError {
+    fn default() -> Self { RPCError { code: 0, message: String::new(), details: Vec::new() } }
+}
+impl RPCError {
+    pub fn new(code: i32, message: impl Into<String>) -> Self {
+        RPCError { code, message: message.into(), ..Default::default() }
+    }
+    /// Attach structured details (builder style).
+    pub fn with_details(mut self, details: Vec<ErrorDetail>) -> Self {
+        self.details = details;
+        self
+    }
 }
 impl std::fmt::Display for RPCError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -127,14 +151,40 @@ pub fn code_from_string(name: &str) -> i32 {
     }
 }
 
+fn wire_details(details: &[ErrorDetail]) -> Vec<serde_json::Value> {
+    details.iter()
+        .map(|d| serde_json::json!({"type": d.type_, "value": b64_encode(&d.value)}))
+        .collect()
+}
+
+fn parse_wire_details(v: Option<&serde_json::Value>) -> Vec<ErrorDetail> {
+    let arr = match v.and_then(|x| x.as_array()) { Some(a) => a, None => return Vec::new() };
+    let mut out = Vec::new();
+    for el in arr {
+        let t = el.get("type").and_then(|x| x.as_str()).unwrap_or("");
+        let val = el.get("value").and_then(|x| x.as_str()).unwrap_or("");
+        if t.is_empty() || val.is_empty() {
+            continue; // malformed entry: skip, never fatal (matrix M7)
+        }
+        if let Some(bytes) = b64_decode(val) {
+            out.push(ErrorDetail { type_: t.to_string(), value: bytes });
+        }
+    }
+    out
+}
+
 /// Encode an END-frame payload in the Connect end-stream JSON shape:
 /// `{"error":{"code":"<name>","message":"..."}}`; a clean end is empty.
-pub fn encode_end_stream(code: i32, message: &str) -> Vec<u8> {
+/// Details (spec §4.1) are included when non-empty.
+pub fn encode_end_stream(code: i32, message: &str, details: &[ErrorDetail]) -> Vec<u8> {
     if code == 0 {
         return Vec::new();
     }
-    let esc = message.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("{{\"error\":{{\"code\":\"{}\",\"message\":\"{}\"}}}}", code_to_string(code), esc).into_bytes()
+    let mut err = serde_json::json!({"code": code_to_string(code), "message": message});
+    if !details.is_empty() {
+        err["details"] = serde_json::Value::Array(wire_details(details));
+    }
+    serde_json::to_vec(&serde_json::json!({"error": err})).unwrap_or_default()
 }
 
 // ---- gzip (opt-in) ----
@@ -173,48 +223,79 @@ pub fn frame_compressed(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Encode a Connect unary error body `{code,message}`.
-pub fn encode_error_json(code: i32, message: &str) -> Vec<u8> {
-    let esc = message.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("{{\"code\":\"{}\",\"message\":\"{}\"}}", code_to_string(code), esc).into_bytes()
+/// Encode a Connect unary error body `{code,message[,details]}`.
+pub fn encode_error_json(code: i32, message: &str, details: &[ErrorDetail]) -> Vec<u8> {
+    let mut body = serde_json::json!({"code": code_to_string(code), "message": message});
+    if !details.is_empty() {
+        body["details"] = serde_json::Value::Array(wire_details(details));
+    }
+    serde_json::to_vec(&body).unwrap_or_default()
 }
 
 /// Decode a Connect unary error body; (0, "") when not an error body.
-pub fn decode_error_json(body: &[u8]) -> (i32, String) {
-    if body.is_empty() { return (0, String::new()); }
-    let s = match std::str::from_utf8(body) { Ok(s) => s, Err(_) => return (0, String::new()) };
-    match extract_json_str(s, "code") {
-        Some(name) => (code_from_string(&name), extract_json_str(s, "message").unwrap_or_default()),
-        None => (0, String::new()),
-    }
+/// Malformed bodies return (0, "", []); malformed detail entries are skipped
+/// (matrix M7).
+pub fn decode_error_json(body: &[u8]) -> (i32, String, Vec<ErrorDetail>) {
+    if body.is_empty() { return (0, String::new(), Vec::new()); }
+    let v: serde_json::Value = match serde_json::from_slice(body) { Ok(v) => v, Err(_) => return (0, String::new(), Vec::new()) };
+    let name = match v.get("code").and_then(|x| x.as_str()) { Some(n) => n, None => return (0, String::new(), Vec::new()) };
+    (code_from_string(name),
+     v.get("message").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+     parse_wire_details(v.get("details")))
 }
 
-/// Decode a Connect end-stream payload. `(0, "")` = clean end.
-pub fn decode_end_stream(payload: &[u8]) -> (i32, String) {
+/// Decode a Connect end-stream payload. `(0, "")` = clean end; malformed
+/// input is a clean end (matrix M2), and an error object without a code maps
+/// to code 2 (M3/M4). Unknown fields are ignored (M5).
+pub fn decode_end_stream(payload: &[u8]) -> (i32, String, Vec<ErrorDetail>) {
     if payload.is_empty() {
-        return (0, String::new());
+        return (0, String::new(), Vec::new());
     }
-    let s = match std::str::from_utf8(payload) { Ok(s) => s, Err(_) => return (0, String::new()) };
-    // Minimal parse: pull the "code" and "message" string values.
-    let code = extract_json_str(s, "code").map(|c| code_from_string(&c)).unwrap_or(2);
-    let message = extract_json_str(s, "message").unwrap_or_default();
-    (code, message)
+    let v: serde_json::Value = match serde_json::from_slice(payload) { Ok(v) => v, Err(_) => return (0, String::new(), Vec::new()) };
+    let err = match v.get("error") { Some(e) => e, None => return (0, String::new(), Vec::new()) };
+    let code = match err.get("code").and_then(|x| x.as_str()) {
+        Some(c) => code_from_string(c),
+        None => 2,
+    };
+    (code,
+     err.get("message").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+     parse_wire_details(err.get("details")))
 }
 
-fn extract_json_str(s: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\"");
-    let i = s.find(&needle)? + needle.len();
-    let rest = &s[i..];
-    let colon = rest.find(':')? + 1;
-    let after = rest[colon..].trim_start();
-    let after = after.strip_prefix('"')?;
-    let mut out = String::new();
-    let mut chars = after.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => return Some(out),
-            '\\' => { if let Some(n) = chars.next() { out.push(n); } }
-            _ => out.push(c),
+// Minimal, dependency-free base64 (standard alphabet, padded) for error
+// details; details are small so a simple table decoder is fine.
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+pub fn b64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let n = ((chunk[0] as u32) << 16) | ((*chunk.get(1).unwrap_or(&0) as u32) << 8) | (*chunk.get(2).unwrap_or(&0) as u32);
+        out.push(B64[(n >> 18) as usize & 63] as char);
+        out.push(B64[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+pub fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits = 0u32;
+    if s.len() % 4 != 0 { return None; }
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => return None, // strict: invalid char rejects the whole value (M7)
+        };
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
         }
     }
     Some(out)

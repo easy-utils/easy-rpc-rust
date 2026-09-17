@@ -1,6 +1,6 @@
 [package]
 name = "easy-rpc"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 
 [features]
@@ -14,6 +14,9 @@ axum = ["dep:axum", "server"]
 # server: HTTP server surface (dispatch + hyper/axum adapters). Off for
 # client-only builds so no server runtime is linked.
 server = []
+
+[lib]
+doctest = false
 
 [dependencies]
 prost = "0.13"

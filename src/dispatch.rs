@@ -44,21 +44,21 @@ pub async fn handle(
 
     if let Some(pv) = req.headers.get(HEADER_PROTOCOL_VERSION).and_then(|v| v.first()) {
         if pv != CONNECT_PROTOCOL_VERSION {
-            return write_error(w.as_ref(), &RPCError { code: 12, message: format!("unsupported connect-protocol-version: {pv}") });
+            return write_error(w.as_ref(), &RPCError { code: 12, message: format!("unsupported connect-protocol-version: {pv}"), ..Default::default() });
         }
     }
     if req.body.as_ref().map(|b| b.len()).unwrap_or(0) > DEFAULT_MAX_MESSAGE_BYTES {
-        return write_error(w.as_ref(), &RPCError { code: 8, message: "request too large".into() });
+        return write_error(w.as_ref(), &RPCError { code: 8, message: "request too large".into(), ..Default::default() });
     }
 
     let spec = methods.iter().find(|m| m.path == path);
     let Some(spec) = spec else {
-        return write_error(w.as_ref(), &RPCError { code: 5, message: "not found".into() });
+        return write_error(w.as_ref(), &RPCError { code: 5, message: "not found".into(), ..Default::default() });
     };
 
     if spec.server_stream {
         let Some(h) = reg.stream.get(&spec.name) else {
-            return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into() });
+            return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
         };
         // Connect semantics: stream is always HTTP 200; failures ride the END frame.
         w.status(200);
@@ -85,13 +85,13 @@ pub async fn handle(
             }
             wc.write_frame(frame(&p, false))
         });
-        let result = h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), emit);
+        let result = h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), &req.headers, emit);
         if ended.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
         if let Err(e) = result {
             ended.store(true, std::sync::atomic::Ordering::SeqCst);
-            let _ = w.write_frame(frame(&encode_end_stream(e.code, &e.message), true));
+            let _ = w.write_frame(frame(&encode_end_stream(e.code, &e.message, &e.details), true));
             return;
         }
         ended.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -100,9 +100,9 @@ pub async fn handle(
     }
 
     let Some(h) = reg.unary.get(&spec.name) else {
-        return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into() });
+        return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
     };
-    match h(req.body.clone().unwrap_or_default().to_vec(), kind.clone()) {
+    match h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), &req.headers) {
         Ok(out) => {
             w.status(200);
             let mut headers = BTreeMap::new();
@@ -119,7 +119,7 @@ fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
     let mut headers = BTreeMap::new();
     headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
     w.header(headers);
-    let _ = w.write_frame(encode_error_json(e.code, &e.message));
+    let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
 }
 
 /// Minimal request context (headers). User-defined middleware can enrich this;

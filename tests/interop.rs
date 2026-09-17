@@ -42,7 +42,7 @@ async fn server_registry_ok() {
     use easy_rpc::protocol::MethodSpec;
     let reg = ServerRegistry { unary: Default::default(), stream: Default::default() };
     let specs = easy_rpc::easyrpc::conformance::v1::method_specs();
-    assert_eq!(specs.len(), 4);
+    assert_eq!(specs.len(), 9);
     assert!(specs.iter().any(|s: &MethodSpec| s.server_stream));
     let _ = reg;
 }

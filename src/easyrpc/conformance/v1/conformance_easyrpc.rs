@@ -5,5 +5,10 @@ pub fn method_specs() -> Vec<crate::protocol::MethodSpec> {
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Echo".to_string(), path: "/v1/echo".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: false, body: String::new() },
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Count".to_string(), path: "/v1/count".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: true, body: String::new() },
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Fail".to_string(), path: "/v1/fail".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: false, body: String::new() },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "StreamFail".to_string(), path: "/v1/stream-fail".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: true, body: String::new() },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "EchoMeta".to_string(), path: "/v1/echo-meta".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: false, body: String::new() },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Big".to_string(), path: "/v1/big".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: false, body: String::new() },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "FailDetails".to_string(), path: "/v1/fail-details".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: false, body: String::new() },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "StreamFailDetails".to_string(), path: "/v1/stream-fail-details".to_string(), http_method: "POST".to_string(), client_stream: false, server_stream: true, body: String::new() },
   ]
 }

@@ -76,7 +76,7 @@ where
     }
     match tokio::time::timeout(std::time::Duration::from_millis(ms), fut).await {
         Ok(r) => r,
-        Err(_) => Err(RPCError { code: 4, message: "deadline exceeded".into() }),
+        Err(_) => Err(RPCError { code: 4, message: "deadline exceeded".into(), ..Default::default() }),
     }
 }
 

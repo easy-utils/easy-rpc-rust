@@ -24,7 +24,7 @@ impl ResponseWriter for ChanWriter {
         *self.headers.lock().unwrap() = headers;
     }
     fn write_frame(&self, payload: Vec<u8>) -> Result<(), RPCError> {
-        self.tx.send(Bytes::from(payload)).map_err(|e| RPCError { code: 13, message: e.to_string() })
+        self.tx.send(Bytes::from(payload)).map_err(|e| RPCError { code: 13, message: e.to_string(), ..Default::default() })
     }
 }
 
@@ -43,7 +43,7 @@ async fn stream_is_incremental() {
     let mut reg2 = ServerRegistry { unary: Default::default(), stream: Default::default() };
     reg2.stream.insert(
         "Slow".to_string(),
-        Box::new(|_req: Vec<u8>, _kind: String, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| {
+        Box::new(|_req: Vec<u8>, _kind: String, _h: &easy_rpc::protocol::Headers, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| {
             for i in 0..3u8 {
                 let _ = emit(vec![i]);
                 std::thread::sleep(Duration::from_millis(150));
@@ -96,7 +96,7 @@ async fn interceptor_transport_applies_metadata() {
             Ok(Response { status: 200, headers: Headers::new(), body: bytes::Bytes::new(), error: None })
         }
         async fn open_stream(&self, _req: Request) -> Result<Box<dyn Stream>, RPCError> {
-            Err(RPCError { code: 12, message: "n/a".into() })
+            Err(RPCError { code: 12, message: "n/a".into(), ..Default::default() })
         }
     }
 
@@ -112,10 +112,10 @@ async fn interceptor_transport_applies_metadata() {
 
 #[test]
 fn error_json_roundtrip() {
-    let b = easy_rpc::protocol::encode_error_json(7, "denied");
+    let b = easy_rpc::protocol::encode_error_json(7, "denied", &[]);
     assert_eq!(std::str::from_utf8(&b).unwrap(), r#"{"code":"permission_denied","message":"denied"}"#);
-    let (c, m) = easy_rpc::protocol::decode_error_json(&b);
-    assert_eq!((c, m.as_str()), (7, "denied"));
+    let (c, m, ds) = easy_rpc::protocol::decode_error_json(&b);
+    assert_eq!((c, m.as_str(), ds.len()), (7, "denied", 0));
     assert_eq!(easy_rpc::protocol::decode_error_json(b"plain").0, 0);
 }
 

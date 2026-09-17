@@ -62,7 +62,7 @@ impl Transport for HyperClient {
         let res = sender.send_request(hreq).await.map_err(|e| err_box(e.to_string()))?;
         let (parts, incoming) = res.into_parts();
         if parts.status.as_u16() >= 300 {
-            return Err(RPCError { code: connect_from_status(parts.status.as_u16()), message: "http error".to_string() });
+            return Err(RPCError { code: connect_from_status(parts.status.as_u16()), message: "http error".to_string(), ..Default::default() });
         }
         Ok(Box::new(HyperStream { incoming, err: None }))
     }
@@ -90,8 +90,8 @@ impl Stream for HyperStream {
                     if let Some((payload, end, flags_consumed)) = read_frame(&chunk) {
                         let _ = flags_consumed;
                         if end {
-                            let (code, message) = crate::protocol::decode_end_stream(&payload);
-                            if code != 0 { self.err = Some(RPCError { code, message }); }
+                            let (code, message, details) = crate::protocol::decode_end_stream(&payload);
+                            if code != 0 { self.err = Some(RPCError { code, message, details }) }
                             return None;
                         }
                         // Decompress when flagged (identity when it fails).
@@ -119,5 +119,5 @@ fn origin_form(url: &str) -> String {
 }
 
 fn err_box(e: String) -> RPCError {
-    RPCError { code: 13, message: e }
+    RPCError { code: 13, message: e, ..Default::default() }
 }

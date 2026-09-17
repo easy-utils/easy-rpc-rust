@@ -40,4 +40,75 @@ pub struct HealthResponse {
     #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
 }
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StreamFailRequest {
+    #[prost(int32, tag = "1")]
+    pub emit_before: i32,
+    #[prost(int32, tag = "2")]
+    pub code: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct StreamFailResponse {
+    #[prost(int32, tag = "1")]
+    pub index: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct EchoMetaRequest {
+    #[prost(string, tag = "1")]
+    pub input: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct EchoMetaResponse {
+    #[prost(string, tag = "1")]
+    pub input: ::prost::alloc::string::String,
+    #[prost(map = "string, string", tag = "2")]
+    pub meta: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct BigRequest {
+    #[prost(int32, tag = "1")]
+    pub size: i32,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct BigResponse {
+    #[prost(int32, tag = "1")]
+    pub size: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FailDetailsRequest {
+    #[prost(int32, tag = "1")]
+    pub code: i32,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub detail_type: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub detail_text: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct FailDetailsResponse {
+    #[prost(bool, tag = "1")]
+    pub ok: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StreamFailDetailsRequest {
+    #[prost(int32, tag = "1")]
+    pub emit_before: i32,
+    #[prost(int32, tag = "2")]
+    pub code: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub detail_type: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub detail_text: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct StreamFailDetailsResponse {
+    #[prost(int32, tag = "1")]
+    pub index: i32,
+}
 // @@protoc_insertion_point(module)

@@ -108,8 +108,8 @@ async fn send_with(client: &Client, base: &str, req: Request) -> Result<Response
     };
     let msg = String::from_utf8_lossy(&bytes).to_string();
     let err = if status >= 300 {
-        let (c, m) = crate::protocol::decode_error_json(&bytes);
-        Some(if c != 0 { RPCError { code: c, message: m } } else { RPCError { code: connect_from_status(status), message: msg } })
+        let (c, m, ds) = crate::protocol::decode_error_json(&bytes);
+        Some(if c != 0 { RPCError { code: c, message: m, details: ds } } else { RPCError { code: connect_from_status(status), message: msg, ..Default::default() } })
     } else { None };
     Ok(Response {
         status,
@@ -131,7 +131,7 @@ async fn open_stream_with(client: &Client, base: &str, req: Request) -> Result<B
     rb = rb.header("content-type", "application/connect+proto");
     let resp = rb.body(req.body.clone().unwrap_or_default()).send().await.map_err(|e| err_box(e.to_string()))?;
     if resp.status().as_u16() >= 300 {
-        return Err(RPCError { code: connect_from_status(resp.status().as_u16()), message: "http error".to_string() });
+        return Err(RPCError { code: connect_from_status(resp.status().as_u16()), message: "http error".to_string(), ..Default::default() });
     }
     let mut stream = resp.bytes_stream();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<Bytes, String>>();
@@ -166,9 +166,9 @@ impl Stream for ReqwestStream {
                     Bytes::from(crate::protocol::gzip_decompress(&payload))
                 } else { payload };
                 if flags & 0x02 != 0 {
-                    let (code, message) = crate::protocol::decode_end_stream(&payload);
+                    let (code, message, details) = crate::protocol::decode_end_stream(&payload);
                     if code != 0 {
-                        self.err = Some(RPCError { code, message });
+                        self.err = Some(RPCError { code, message, details });
                     }
                     return None;
                 }
@@ -204,5 +204,5 @@ fn reqwest_headers_to_headers(h: &reqwest::header::HeaderMap) -> crate::protocol
 }
 
 fn err_box(e: String) -> RPCError {
-    RPCError { code: 13, message: e }
+    RPCError { code: 13, message: e, ..Default::default() }
 }
