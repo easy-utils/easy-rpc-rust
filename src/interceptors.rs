@@ -6,7 +6,9 @@
 //! for `HyperClient` (or a user transport) keeps every interceptor unchanged.
 use std::sync::Arc;
 
-use crate::protocol::{Interceptor, Request, Response, RPCError, Stream, Transport};
+use crate::protocol::{
+    Headers, Interceptor, MetadataInterceptor, Request, Response, RPCError, Stream, TimeoutInterceptor, Transport,
+};
 
 /// A `Transport` that runs every call through `interceptors` (first =
 /// outermost), then delegates to `inner`.
@@ -76,6 +78,45 @@ where
         Ok(r) => r,
         Err(_) => Err(RPCError { code: 4, message: "deadline exceeded".into() }),
     }
+}
+
+/// Adapter mode for the Rust composition root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// reqwest-based adapter (h1 + h2/h2c + optional h3), with h1 fallback.
+    Auto,
+    /// hyper-based adapter.
+    Hyper,
+}
+
+/// Composition root: pick an adapter by `mode`, install the built-in
+/// metadata/deadline interceptors, then any extra. Swapping `mode` leaves the
+/// interceptors unchanged.
+pub fn connect(
+    base: &str,
+    token: &str,
+    mode: Mode,
+    timeout_ms: u64,
+    extra: Vec<Arc<dyn Interceptor>>,
+) -> Arc<dyn Transport> {
+    let inner: Arc<dyn Transport> = match mode {
+        Mode::Hyper => Arc::new(crate::bridge_hyper::HyperClient::new(base.to_string())),
+        Mode::Auto => Arc::from(crate::bridge_reqwest::NewClient(base.to_string())),
+    };
+    let mut ics: Vec<Arc<dyn Interceptor>> = Vec::new();
+    if !token.is_empty() {
+        let mut md = Headers::new();
+        md.insert("authorization".into(), vec![format!("Bearer {token}")]);
+        ics.push(Arc::new(MetadataInterceptor(md)));
+    }
+    if timeout_ms > 0 {
+        ics.push(Arc::new(TimeoutInterceptor(timeout_ms)));
+    }
+    ics.extend(extra);
+    if ics.is_empty() {
+        return inner;
+    }
+    Arc::new(InterceptorTransport::new(ics, inner))
 }
 
 /// Convenience: wrap a transport with interceptors (first = outermost).

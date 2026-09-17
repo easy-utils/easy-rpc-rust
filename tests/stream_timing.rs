@@ -145,3 +145,16 @@ async fn deadline_helper_times_out() {
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().code, 4);
 }
+
+#[tokio::test]
+async fn connect_composition_root() {
+    use easy_rpc::interceptors::{connect, Mode};
+    let t = connect("http://127.0.0.1:1", "abc", Mode::Auto, 60, vec![]);
+    let start = std::time::Instant::now();
+    let r = t.send(easy_rpc::protocol::Request {
+        url: "/x".into(), method: "POST".into(),
+        headers: easy_rpc::protocol::Headers::new(), body: None,
+    }).await;
+    assert!(r.is_err());
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+}
