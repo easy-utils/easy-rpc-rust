@@ -21,7 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reg = build_registry();
     let ctx = Ctx { reg: std::sync::Arc::new(reg), methods: std::sync::Arc::new(methods) };
 
-    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
+    // BIND=127.0.0.1 keeps it pod-local; default 0.0.0.0 for in-cluster peers.
+    let bind = std::env::var("BIND").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let listener = TcpListener::bind((bind.as_str(), port)).await?;
     println!("rust on {}", port);
     loop {
         let (stream, _) = listener.accept().await?;

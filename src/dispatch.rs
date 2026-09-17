@@ -147,10 +147,10 @@ impl RequestContext {
 
 fn content_kind_headers(h: &crate::protocol::Headers) -> String {
     if let Some(ct) = h.get("content-type").and_then(|v| v.first()) {
-        if ct.starts_with("application/json") { return "json".to_string() }
+        if ct.starts_with("application/json") || ct.starts_with("application/connect+json") { return "json".to_string() }
     }
     if let Some(ac) = h.get("accept").and_then(|v| v.first()) {
-        if ac.starts_with("application/json") { return "json".to_string() }
+        if ac.starts_with("application/json") || ac.starts_with("application/connect+json") { return "json".to_string() }
     }
     "proto".to_string()
 }

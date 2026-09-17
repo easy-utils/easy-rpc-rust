@@ -25,7 +25,7 @@ pub struct ServerRegistry {
 
 pub fn content_kind(req: &Request) -> String {
     if let Some(ct) = req.headers.get("content-type").and_then(|v| v.first()) {
-        if ct.starts_with("application/json") { return "json".to_string() }
+        if ct.starts_with("application/json") || ct.starts_with("application/connect+json") { return "json".to_string() }
     }
     "proto".to_string()
 }
