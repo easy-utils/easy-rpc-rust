@@ -66,3 +66,18 @@ async fn stream_is_incremental() {
     assert!(first_at < Duration::from_millis(100), "first frame at {first_at:?} — buffered");
     println!("PASS: first frame at {first_at:?}");
 }
+
+#[test]
+fn timeout_helpers() {
+    assert_eq!(easy_rpc::protocol::parse_timeout(""), 0);
+    assert_eq!(easy_rpc::protocol::parse_timeout("0"), 0);
+    assert_eq!(easy_rpc::protocol::parse_timeout("250"), 250);
+    let req = easy_rpc::protocol::Request {
+        url: "/x".into(), method: "POST".into(),
+        headers: easy_rpc::protocol::Headers::new(), body: None,
+    };
+    let req = easy_rpc::protocol::with_timeout(req, 300);
+    assert_eq!(req.headers.get(easy_rpc::protocol::HEADER_TIMEOUT).unwrap()[0], "300");
+    let ctx = easy_rpc::dispatch::RequestContext::new(req.headers);
+    assert_eq!(ctx.deadline_ms, 300);
+}

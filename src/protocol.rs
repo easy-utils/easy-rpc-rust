@@ -183,6 +183,22 @@ pub fn read_frame(buf: &[u8]) -> Option<(Vec<u8>, bool, usize)> {
     Some((payload, end, 5 + len))
 }
 
+/// The Connect request-timeout header.
+pub const HEADER_TIMEOUT: &str = "connect-timeout-ms";
+
+/// Parse the Connect timeout header into milliseconds (0 = none).
+pub fn parse_timeout(value: &str) -> u64 {
+    if value.is_empty() { return 0; }
+    value.trim().parse::<u64>().unwrap_or(0)
+}
+
+/// Attach a deadline to a request's headers.
+pub fn with_timeout(mut req: Request, timeout_ms: u64) -> Request {
+    if timeout_ms == 0 { return req; }
+    req.headers.insert(HEADER_TIMEOUT.to_string(), vec![timeout_ms.to_string()]);
+    req
+}
+
 /// Default gRPC-style path.
 pub fn url_for(pkg: &str, svc: &str, method: &str) -> String {
     format!("/{pkg}.{svc}/{method}")

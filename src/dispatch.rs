@@ -7,7 +7,7 @@
 //!
 //! Server-stream is written frame-by-frame: the adapter flushes each frame, so
 //! responses are truly incremental — never buffered.
-use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, frame, http_status};
+use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, frame, http_status, parse_timeout, HEADER_TIMEOUT};
 use crate::server::ServerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,8 +23,12 @@ pub trait ResponseWriter: Send + Sync {
 }
 
 /// Resolve an RPC request, pushing the response into `w`.
+///
+/// Deadline: the Connect timeout header is parsed and surfaced to handlers via
+/// `RequestContext.deadline_ms`. Rust handlers are synchronous closures, so
+/// enforcement is cooperative — a handler that loops must check the context.
 pub async fn handle(
-    _ctx: &RequestContext,
+    ctx: &RequestContext,
     req: Request,
     methods: &[MethodSpec],
     reg: &ServerRegistry,
@@ -102,10 +106,19 @@ fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
 #[derive(Debug, Default, Clone)]
 pub struct RequestContext {
     pub headers: BTreeMap<String, Vec<String>>,
+    /// Connect deadline in milliseconds (0 = none).
+    pub deadline_ms: u64,
 }
 
 impl RequestContext {
-    pub fn new(headers: BTreeMap<String, Vec<String>>) -> Self { Self { headers } }
+    pub fn new(headers: BTreeMap<String, Vec<String>>) -> Self {
+        let deadline_ms = headers
+            .get(HEADER_TIMEOUT)
+            .and_then(|v| v.first())
+            .map(|s| parse_timeout(s))
+            .unwrap_or(0);
+        Self { headers, deadline_ms }
+    }
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|v| v.first()).map(|s| s.as_str())
     }
