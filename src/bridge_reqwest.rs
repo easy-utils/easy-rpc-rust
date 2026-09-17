@@ -162,6 +162,9 @@ impl Stream for ReqwestStream {
                 if self.acc.len() < 5 + len { break }
                 let payload = self.acc.slice(5..5 + len);
                 self.acc = self.acc.slice(5 + len..);
+                let payload = if flags & 0x01 != 0 {
+                    Bytes::from(crate::protocol::gzip_decompress(&payload))
+                } else { payload };
                 if flags & 0x02 != 0 {
                     let (code, message) = crate::protocol::decode_end_stream(&payload);
                     if code != 0 {

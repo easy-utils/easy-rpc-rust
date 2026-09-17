@@ -114,3 +114,13 @@ fn limits_and_version_consts() {
     assert_eq!(easy_rpc::protocol::CONNECT_PROTOCOL_VERSION, "1");
     assert_eq!(easy_rpc::protocol::DEFAULT_MAX_MESSAGE_BYTES, 4 * 1024 * 1024);
 }
+
+#[test]
+fn gzip_roundtrip() {
+    let orig: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    let z = easy_rpc::protocol::gzip_compress(&orig);
+    assert!(z.len() < orig.len(), "did not compress");
+    assert_eq!(easy_rpc::protocol::gzip_decompress(&z), orig);
+    let fr = easy_rpc::protocol::frame_compressed(&orig);
+    assert_ne!(fr[0] & 0x01, 0);
+}

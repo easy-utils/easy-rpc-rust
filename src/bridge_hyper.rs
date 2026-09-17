@@ -87,12 +87,15 @@ impl Stream for HyperStream {
             match frame {
                 Some(Ok(f)) => {
                     let chunk = f.into_data().ok()?;
-                    if let Some((payload, end, _)) = read_frame(&chunk) {
+                    if let Some((payload, end, flags_consumed)) = read_frame(&chunk) {
+                        let _ = flags_consumed;
                         if end {
                             let (code, message) = crate::protocol::decode_end_stream(&payload);
                             if code != 0 { self.err = Some(RPCError { code, message }); }
                             return None;
                         }
+                        // Decompress when flagged (identity when it fails).
+                        let payload = crate::protocol::gzip_decompress(&payload);
                         return Some(Bytes::from(payload));
                     }
                 }

@@ -137,6 +137,42 @@ pub fn encode_end_stream(code: i32, message: &str) -> Vec<u8> {
     format!("{{\"error\":{{\"code\":\"{}\",\"message\":\"{}\"}}}}", code_to_string(code), esc).into_bytes()
 }
 
+// ---- gzip (opt-in) ----
+
+/// Compression headers + threshold.
+pub const HEADER_ACCEPT_ENCODING: &str = "connect-accept-encoding";
+pub const ENCODING_GZIP: &str = "gzip";
+pub const COMPRESS_MIN_BYTES: usize = 1024;
+
+/// gzip-compress data.
+pub fn gzip_compress(data: &[u8]) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    let _ = e.write_all(data);
+    e.finish().unwrap_or_default()
+}
+
+/// gzip-decompress data (identity on failure).
+pub fn gzip_decompress(data: &[u8]) -> Vec<u8> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+    let mut out = Vec::new();
+    if GzDecoder::new(data).read_to_end(&mut out).is_ok() {
+        out
+    } else {
+        data.to_vec()
+    }
+}
+
+/// Frame a payload with the Compressed flag set.
+pub fn frame_compressed(payload: &[u8]) -> Vec<u8> {
+    let mut out = frame(payload, false);
+    out[0] |= 0x01;
+    out
+}
+
 /// Encode a Connect unary error body `{code,message}`.
 pub fn encode_error_json(code: i32, message: &str) -> Vec<u8> {
     let esc = message.replace('\\', "\\\\").replace('"', "\\\"");

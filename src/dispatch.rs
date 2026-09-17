@@ -10,6 +10,7 @@
 use crate::protocol::{
     Headers, MethodSpec, RPCError, Request, encode_end_stream, encode_error_json, frame, http_status,
     parse_timeout, HEADER_TIMEOUT, HEADER_PROTOCOL_VERSION, CONNECT_PROTOCOL_VERSION, DEFAULT_MAX_MESSAGE_BYTES,
+    HEADER_ACCEPT_ENCODING, ENCODING_GZIP, COMPRESS_MIN_BYTES, gzip_compress, frame_compressed,
 };
 use crate::server::ServerRegistry;
 use std::collections::BTreeMap;
@@ -67,12 +68,20 @@ pub async fn handle(
             vec![if kind == "json" { "application/connect+json" } else { "application/connect+proto" }.to_string()],
         );
         w.header(headers);
+        let wants_gzip = req
+            .headers
+            .get(HEADER_ACCEPT_ENCODING)
+            .map(|vs| vs.iter().any(|v| v.split(',').any(|e| e.trim() == ENCODING_GZIP)))
+            .unwrap_or(false);
         let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let end_flag = ended.clone();
         let wc = w.clone();
         let emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync> = Box::new(move |p: Vec<u8>| {
             if end_flag.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(());
+            }
+            if wants_gzip && p.len() >= COMPRESS_MIN_BYTES {
+                return wc.write_frame(frame_compressed(&gzip_compress(&p)));
             }
             wc.write_frame(frame(&p, false))
         });
