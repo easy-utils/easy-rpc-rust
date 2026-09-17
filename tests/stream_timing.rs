@@ -99,3 +99,12 @@ fn metadata_interceptor_adds_headers() {
     let h = out.lock().unwrap().clone().unwrap();
     assert_eq!(h.get("x-test").unwrap()[0], "abc");
 }
+
+#[test]
+fn error_json_roundtrip() {
+    let b = easy_rpc::protocol::encode_error_json(7, "denied");
+    assert_eq!(std::str::from_utf8(&b).unwrap(), r#"{"code":"permission_denied","message":"denied"}"#);
+    let (c, m) = easy_rpc::protocol::decode_error_json(&b);
+    assert_eq!((c, m.as_str()), (7, "denied"));
+    assert_eq!(easy_rpc::protocol::decode_error_json(b"plain").0, 0);
+}

@@ -107,13 +107,15 @@ async fn send_with(client: &Client, base: &str, req: Request) -> Result<Response
         resp.bytes().await.unwrap_or_default()
     };
     let msg = String::from_utf8_lossy(&bytes).to_string();
+    let err = if status >= 300 {
+        let (c, m) = crate::protocol::decode_error_json(&bytes);
+        Some(if c != 0 { RPCError { code: c, message: m } } else { RPCError { code: connect_from_status(status), message: msg } })
+    } else { None };
     Ok(Response {
         status,
         headers: reqwest_headers_to_headers(&headers),
         body: bytes,
-        error: if status >= 300 {
-            Some(RPCError { code: connect_from_status(status), message: msg })
-        } else { None },
+        error: err,
     })
 }
 

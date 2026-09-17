@@ -7,7 +7,7 @@
 //!
 //! Server-stream is written frame-by-frame: the adapter flushes each frame, so
 //! responses are truly incremental — never buffered.
-use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, frame, http_status, parse_timeout, HEADER_TIMEOUT};
+use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, encode_error_json, frame, http_status, parse_timeout, HEADER_TIMEOUT};
 use crate::server::ServerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -96,9 +96,9 @@ pub async fn handle(
 fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
     w.status(http_status(e.code));
     let mut headers = BTreeMap::new();
-    headers.insert("content-type".to_string(), vec!["text/plain".to_string()]);
+    headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
     w.header(headers);
-    let _ = w.write_frame(e.message.clone().into_bytes());
+    let _ = w.write_frame(encode_error_json(e.code, &e.message));
 }
 
 /// Minimal request context (headers). User-defined middleware can enrich this;

@@ -137,6 +137,22 @@ pub fn encode_end_stream(code: i32, message: &str) -> Vec<u8> {
     format!("{{\"error\":{{\"code\":\"{}\",\"message\":\"{}\"}}}}", code_to_string(code), esc).into_bytes()
 }
 
+/// Encode a Connect unary error body `{code,message}`.
+pub fn encode_error_json(code: i32, message: &str) -> Vec<u8> {
+    let esc = message.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("{{\"code\":\"{}\",\"message\":\"{}\"}}", code_to_string(code), esc).into_bytes()
+}
+
+/// Decode a Connect unary error body; (0, "") when not an error body.
+pub fn decode_error_json(body: &[u8]) -> (i32, String) {
+    if body.is_empty() { return (0, String::new()); }
+    let s = match std::str::from_utf8(body) { Ok(s) => s, Err(_) => return (0, String::new()) };
+    match extract_json_str(s, "code") {
+        Some(name) => (code_from_string(&name), extract_json_str(s, "message").unwrap_or_default()),
+        None => (0, String::new()),
+    }
+}
+
 /// Decode a Connect end-stream payload. `(0, "")` = clean end.
 pub fn decode_end_stream(payload: &[u8]) -> (i32, String) {
     if payload.is_empty() {
