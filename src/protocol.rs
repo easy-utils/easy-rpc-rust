@@ -266,66 +266,42 @@ pub fn url_for(pkg: &str, svc: &str, method: &str) -> String {
     format!("/{pkg}.{svc}/{method}")
 }
 
-/// An interceptor wraps a call. It may mutate the request (auth/metadata),
-/// impose a deadline, or observe/short-circuit. `next` performs the call.
-/// Kept object-safe and minimal; bridges apply them around the Transport.
+/// An interceptor observes/rewrites a call. To stay object-safe and ergonomic
+/// in Rust, it is a pre-hook (`intercept`) plus an optional post-hook
+/// (`observe`). Metadata, deadlines, and logging are all expressible this way.
+/// A wrap-style interceptor (retry / circuit breaking) can compose several
+/// calls inside `intercept` if needed.
+#[async_trait::async_trait]
 pub trait Interceptor: Send + Sync {
-    fn unary<'a>(
-        &'a self,
-        req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>>;
-
-    fn stream<'a>(
-        &'a self,
-        req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>>;
+    /// Rewrite the request before the call, or return an error to short-circuit.
+    async fn intercept(&self, req: Request) -> Result<Request, RPCError> {
+        Ok(req)
+    }
+    /// Observe a completed call (success case).
+    async fn observe(&self, _req: &Request, _resp: &Response) {}
 }
 
 /// Attach fixed metadata to every call.
 pub struct MetadataInterceptor(pub Headers);
 
+#[async_trait::async_trait]
 impl Interceptor for MetadataInterceptor {
-    fn unary<'a>(
-        &'a self,
-        mut req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> {
+    async fn intercept(&self, mut req: Request) -> Result<Request, RPCError> {
         for (k, v) in &self.0 {
             req.headers.entry(k.clone()).or_insert_with(|| v.clone());
         }
-        next(req)
-    }
-    fn stream<'a>(
-        &'a self,
-        mut req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> {
-        for (k, v) in &self.0 {
-            req.headers.entry(k.clone()).or_insert_with(|| v.clone());
-        }
-        next(req)
+        Ok(req)
     }
 }
 
-/// Attach a Connect deadline to every call.
+/// Attach a Connect deadline to every call (header; adapters honour it locally
+/// too when they support cancellation).
 pub struct TimeoutInterceptor(pub u64);
 
+#[async_trait::async_trait]
 impl Interceptor for TimeoutInterceptor {
-    fn unary<'a>(
-        &'a self,
-        req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> {
-        next(with_timeout(req, self.0))
-    }
-    fn stream<'a>(
-        &'a self,
-        req: Request,
-        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> {
-        next(with_timeout(req, self.0))
+    async fn intercept(&self, req: Request) -> Result<Request, RPCError> {
+        Ok(with_timeout(req, self.0))
     }
 }
 

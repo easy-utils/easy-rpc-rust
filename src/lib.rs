@@ -1,4 +1,5 @@
 pub mod protocol;
+pub mod interceptors;
 pub mod bridge_hyper;
 pub mod bridge_reqwest;
 
