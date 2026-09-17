@@ -81,3 +81,21 @@ fn timeout_helpers() {
     let ctx = easy_rpc::dispatch::RequestContext::new(req.headers);
     assert_eq!(ctx.deadline_ms, 300);
 }
+
+#[test]
+fn metadata_interceptor_adds_headers() {
+    use easy_rpc::protocol::{Interceptor, MetadataInterceptor, Request, Headers};
+    let mut md = Headers::new();
+    md.insert("x-test".into(), vec!["abc".into()]);
+    let ic = MetadataInterceptor(md);
+    let req = Request { url: "/x".into(), method: "POST".into(), headers: Headers::new(), body: None };
+    let out = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let o = out.clone();
+    let fut = ic.unary(req, Box::new(move |r| {
+        *o.lock().unwrap() = Some(r.headers);
+        Box::pin(async { Ok(easy_rpc::protocol::Response { status: 200, headers: Headers::new(), body: bytes::Bytes::new(), error: None }) })
+    }));
+    let _ = futures::executor::block_on(fut);
+    let h = out.lock().unwrap().clone().unwrap();
+    assert_eq!(h.get("x-test").unwrap()[0], "abc");
+}

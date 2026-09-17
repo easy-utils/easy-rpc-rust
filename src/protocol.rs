@@ -204,6 +204,69 @@ pub fn url_for(pkg: &str, svc: &str, method: &str) -> String {
     format!("/{pkg}.{svc}/{method}")
 }
 
+/// An interceptor wraps a call. It may mutate the request (auth/metadata),
+/// impose a deadline, or observe/short-circuit. `next` performs the call.
+/// Kept object-safe and minimal; bridges apply them around the Transport.
+pub trait Interceptor: Send + Sync {
+    fn unary<'a>(
+        &'a self,
+        req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>>;
+
+    fn stream<'a>(
+        &'a self,
+        req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>>;
+}
+
+/// Attach fixed metadata to every call.
+pub struct MetadataInterceptor(pub Headers);
+
+impl Interceptor for MetadataInterceptor {
+    fn unary<'a>(
+        &'a self,
+        mut req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> {
+        for (k, v) in &self.0 {
+            req.headers.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        next(req)
+    }
+    fn stream<'a>(
+        &'a self,
+        mut req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> {
+        for (k, v) in &self.0 {
+            req.headers.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        next(req)
+    }
+}
+
+/// Attach a Connect deadline to every call.
+pub struct TimeoutInterceptor(pub u64);
+
+impl Interceptor for TimeoutInterceptor {
+    fn unary<'a>(
+        &'a self,
+        req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, RPCError>> + Send + 'a>> {
+        next(with_timeout(req, self.0))
+    }
+    fn stream<'a>(
+        &'a self,
+        req: Request,
+        next: Box<dyn FnOnce(Request) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> + Send + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Stream>, RPCError>> + Send + 'a>> {
+        next(with_timeout(req, self.0))
+    }
+}
+
 /// MethodSpec mirrors generated metadata.
 #[derive(Clone, Debug)]
 pub struct MethodSpec {
