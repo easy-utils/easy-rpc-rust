@@ -204,21 +204,22 @@ pub fn gzip_compress(data: &[u8]) -> Vec<u8> {
     e.finish().unwrap_or_default()
 }
 
-/// gzip-decompress data (identity on failure).
-pub fn gzip_decompress(data: &[u8]) -> Vec<u8> {
+/// gzip-decompress data. STRICT: returns Err on corrupt input (fault matrix
+/// M10) — a flagged-but-corrupt gzip payload is a protocol error, never
+/// silently-yielded raw compressed bytes.
+pub fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, RPCError> {
     use flate2::read::GzDecoder;
     use std::io::Read;
     let mut out = Vec::new();
-    if GzDecoder::new(data).read_to_end(&mut out).is_ok() {
-        out
-    } else {
-        data.to_vec()
+    match GzDecoder::new(data).read_to_end(&mut out) {
+        Ok(_) => Ok(out),
+        Err(e) => Err(RPCError { code: 13, message: format!("corrupt gzip frame: {e}"), ..Default::default() }),
     }
 }
 
-/// Frame a payload with the Compressed flag set.
+/// Frame a gzip-compressed payload with the Compressed flag set.
 pub fn frame_compressed(payload: &[u8]) -> Vec<u8> {
-    let mut out = frame(payload, false);
+    let mut out = frame(&gzip_compress(payload), false);
     out[0] |= 0x01;
     out
 }

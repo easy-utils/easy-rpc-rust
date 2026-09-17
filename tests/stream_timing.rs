@@ -130,7 +130,7 @@ fn gzip_roundtrip() {
     let orig: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
     let z = easy_rpc::protocol::gzip_compress(&orig);
     assert!(z.len() < orig.len(), "did not compress");
-    assert_eq!(easy_rpc::protocol::gzip_decompress(&z), orig);
+    assert_eq!(easy_rpc::protocol::gzip_decompress(&z).unwrap(), orig);
     let fr = easy_rpc::protocol::frame_compressed(&orig);
     assert_ne!(fr[0] & 0x01, 0);
 }

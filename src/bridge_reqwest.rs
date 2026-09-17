@@ -143,13 +143,14 @@ async fn open_stream_with(client: &Client, base: &str, req: Request) -> Result<B
             }
         }
     });
-    Ok(Box::new(ReqwestStream { rx, acc: Bytes::new(), err: None }))
+    Ok(Box::new(ReqwestStream { rx, acc: Bytes::new(), err: None, ended: false }))
 }
 
 struct ReqwestStream {
     rx: tokio::sync::mpsc::UnboundedReceiver<Result<Bytes, String>>,
     acc: Bytes,
     err: Option<RPCError>,
+    ended: bool,
 }
 
 #[async_trait::async_trait]
@@ -163,9 +164,13 @@ impl Stream for ReqwestStream {
                 let payload = self.acc.slice(5..5 + len);
                 self.acc = self.acc.slice(5 + len..);
                 let payload = if flags & 0x01 != 0 {
-                    Bytes::from(crate::protocol::gzip_decompress(&payload))
+                    match crate::protocol::gzip_decompress(&payload) {
+                        Ok(p) => Bytes::from(p),
+                        Err(e) => { self.err = Some(e); return None; }
+                    }
                 } else { payload };
                 if flags & 0x02 != 0 {
+                    self.ended = true;
                     let (code, message, details) = crate::protocol::decode_end_stream(&payload);
                     if code != 0 {
                         self.err = Some(RPCError { code, message, details });
@@ -176,7 +181,22 @@ impl Stream for ReqwestStream {
             }
             match self.rx.recv().await {
                 Some(Ok(bytes)) => { self.acc = Bytes::from([self.acc.to_vec(), bytes.to_vec()].concat()); }
-                Some(Err(_)) | None => return None,
+                Some(Err(e)) => {
+                    self.err = Some(RPCError { code: 13, message: e, ..Default::default() });
+                    return None;
+                }
+                None => {
+                    // Fault matrix F2/M8: the Connect protocol requires every
+                    // server-stream to terminate with an END frame; a body
+                    // that ends without one (or with trailing partial bytes)
+                    // was truncated mid-stream.
+                    if !self.acc.is_empty() {
+                        self.err = Some(RPCError { code: 13, message: "truncated frame at end of stream".into(), ..Default::default() });
+                    } else if !self.ended {
+                        self.err = Some(RPCError { code: 13, message: "stream ended without END frame".into(), ..Default::default() });
+                    }
+                    return None;
+                }
             }
         }
     }

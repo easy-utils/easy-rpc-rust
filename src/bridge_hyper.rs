@@ -41,7 +41,33 @@ impl Transport for HyperClient {
         let res = sender.send_request(hreq).await.map_err(|e| err_box(e.to_string()))?;
         let (parts, incoming) = res.into_parts();
         let body = incoming.collect().await.map_err(|e| err_box(e.to_string()))?.to_bytes();
-        Ok(Response { status: parts.status.as_u16(), headers: Default::default(), body, error: None })
+        let status = parts.status.as_u16();
+        let mut headers = crate::protocol::Headers::new();
+        for (name, value) in parts.headers.iter() {
+            let k = name.as_str().to_ascii_lowercase();
+            let v = String::from_utf8_lossy(value.as_bytes()).to_string();
+            headers.entry(k).or_default().push(v);
+        }
+        let error = if status >= 300 {
+            let hdr_code = headers.get("connect-code").and_then(|v| v.first());
+            let (c, m, ds) = crate::protocol::decode_error_json(&body);
+            Some(match hdr_code.and_then(|c| c.parse::<i32>().ok()) {
+                Some(c) => {
+                    // header carries the exact code; body may carry details
+                    let msg = headers.get("connect-error").and_then(|v| v.first()).cloned().unwrap_or_default();
+                    RPCError { code: c, message: msg, details: ds }
+                }
+                None if c != 0 => RPCError { code: c, message: m, details: ds },
+                None => RPCError {
+                    code: crate::protocol::connect_from_status(status),
+                    message: String::from_utf8_lossy(&body).to_string(),
+                    ..Default::default()
+                },
+            })
+        } else {
+            None
+        };
+        Ok(Response { status, headers, body, error })
     }
 
     async fn open_stream(&self, req: Request) -> Result<Box<dyn Stream>, RPCError> {
@@ -64,7 +90,7 @@ impl Transport for HyperClient {
         if parts.status.as_u16() >= 300 {
             return Err(RPCError { code: connect_from_status(parts.status.as_u16()), message: "http error".to_string(), ..Default::default() });
         }
-        Ok(Box::new(HyperStream { incoming, err: None }))
+        Ok(Box::new(HyperStream { incoming, buf: Vec::new(), err: None, ended: false }))
     }
 }
 
@@ -76,36 +102,6 @@ async fn connect(url: &str) -> Result<(http1::SendRequest<Full<Bytes>>, http1::C
     let tcp = TcpStream::connect(addr).await.map_err(|e| err_box(e.to_string()))?;
     let io = TokioIo::new(tcp);
     http1::handshake(io).await.map_err(|e| err_box(e.to_string()))
-}
-
-struct HyperStream { incoming: Incoming, err: Option<RPCError> }
-#[async_trait::async_trait]
-impl Stream for HyperStream {
-    async fn recv(&mut self) -> Option<Bytes> {
-        loop {
-            let frame = self.incoming.frame().await;
-            match frame {
-                Some(Ok(f)) => {
-                    let chunk = f.into_data().ok()?;
-                    if let Some((payload, end, flags_consumed)) = read_frame(&chunk) {
-                        let _ = flags_consumed;
-                        if end {
-                            let (code, message, details) = crate::protocol::decode_end_stream(&payload);
-                            if code != 0 { self.err = Some(RPCError { code, message, details }) }
-                            return None;
-                        }
-                        // Decompress when flagged (identity when it fails).
-                        let payload = crate::protocol::gzip_decompress(&payload);
-                        return Some(Bytes::from(payload));
-                    }
-                }
-                Some(Err(_)) | None => return None,
-            }
-        }
-    }
-    fn last_error(&self) -> Option<RPCError> { self.err.clone() }
-    fn cancel(&mut self) {}
-    fn close(&mut self) {}
 }
 
 fn host_of(url: &str) -> String {
@@ -121,3 +117,67 @@ fn origin_form(url: &str) -> String {
 fn err_box(e: String) -> RPCError {
     RPCError { code: 13, message: e, ..Default::default() }
 }
+
+struct HyperStream {
+    incoming: Incoming,
+    buf: Vec<u8>,
+    err: Option<RPCError>,
+    ended: bool,
+}
+
+#[async_trait::async_trait]
+impl Stream for HyperStream {
+    async fn recv(&mut self) -> Option<Bytes> {
+        loop {
+            if self.ended { return None; }
+            // Try to parse one complete frame out of the accumulated buffer:
+            // frames MAY be split across arbitrary network chunks (fault
+            // matrix F5) — a partial chunk must never drop bytes.
+            if self.buf.len() >= 5 {
+                let flags = self.buf[0];
+                let len = u32::from_be_bytes([self.buf[1], self.buf[2], self.buf[3], self.buf[4]]) as usize;
+                if self.buf.len() >= 5 + len {
+                    let payload = self.buf[5..5 + len].to_vec();
+                    self.buf.drain(..5 + len);
+                    let payload = if flags & 0x01 != 0 {
+                        match crate::protocol::gzip_decompress(&payload) {
+                            Ok(p) => p,
+                            Err(e) => { self.err = Some(e); return None; }
+                        }
+                    } else { payload };
+                    if flags & 0x02 != 0 {
+                        self.ended = true;
+                        let (code, message, details) = crate::protocol::decode_end_stream(&payload);
+                        if code != 0 { self.err = Some(RPCError { code, message, details }); }
+                        return None;
+                    }
+                    return Some(Bytes::from(payload));
+                }
+            }
+            let frame = self.incoming.frame().await;
+            match frame {
+                Some(Ok(f)) => {
+                    if let Some(chunk) = f.data_ref() { self.buf.extend_from_slice(chunk); }
+                }
+                Some(Err(e)) => {
+                    self.err = Some(RPCError { code: 13, message: e.to_string(), ..Default::default() });
+                    return None;
+                }
+                None => {
+                    // Fault matrix F2/M8: missing END frame or trailing
+                    // partial bytes = truncated mid-stream.
+                    if !self.buf.is_empty() {
+                        self.err = Some(RPCError { code: 13, message: "truncated frame at end of stream".into(), ..Default::default() });
+                    } else if !self.ended {
+                        self.err = Some(RPCError { code: 13, message: "stream ended without END frame".into(), ..Default::default() });
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+    fn last_error(&self) -> Option<RPCError> { self.err.clone() }
+    fn cancel(&mut self) {}
+    fn close(&mut self) {}
+}
+

@@ -103,6 +103,28 @@ pub fn connect(
         Mode::Hyper => Arc::new(crate::bridge_hyper::HyperClient::new(base.to_string())),
         Mode::Auto => Arc::from(crate::bridge_reqwest::NewClient(base.to_string())),
     };
+    with_standard_interceptors(token, timeout_ms, extra, inner)
+}
+
+/// Composition root with adapter injection: `adapter` replaces the built-in
+/// adapters (mode selection is skipped), and the standard metadata/deadline
+/// interceptors (plus any extra) wrap IT — the same injection semantics as
+/// C# `ConnectOptions.Adapter` and Swift `connect(transport:)`.
+pub fn connect_with_adapter(
+    token: &str,
+    timeout_ms: u64,
+    extra: Vec<Arc<dyn Interceptor>>,
+    adapter: Arc<dyn Transport>,
+) -> Arc<dyn Transport> {
+    with_standard_interceptors(token, timeout_ms, extra, adapter)
+}
+
+fn with_standard_interceptors(
+    token: &str,
+    timeout_ms: u64,
+    extra: Vec<Arc<dyn Interceptor>>,
+    inner: Arc<dyn Transport>,
+) -> Arc<dyn Transport> {
     let mut ics: Vec<Arc<dyn Interceptor>> = Vec::new();
     if !token.is_empty() {
         let mut md = Headers::new();
