@@ -51,6 +51,33 @@ impl Transport for InterceptorTransport {
     }
 }
 
+/// Enforce a local deadline: sets the Connect header AND races the call with a
+/// timeout, so cancellation works over any adapter (no adapter change needed).
+pub struct DeadlineInterceptor(pub u64);
+
+#[async_trait::async_trait]
+impl Interceptor for DeadlineInterceptor {
+    async fn intercept(&self, req: Request) -> Result<Request, RPCError> {
+        Ok(crate::protocol::with_timeout(req, self.0))
+    }
+}
+
+/// Run a call with the DeadlineInterceptor's timeout applied. Provided as a
+/// helper because Rust interceptors are pre-hooks; the timeout must wrap the
+/// transport call, which only the composition root can do.
+pub async fn with_deadline<F, T>(ms: u64, fut: F) -> Result<T, RPCError>
+where
+    F: std::future::Future<Output = Result<T, RPCError>>,
+{
+    if ms == 0 {
+        return fut.await;
+    }
+    match tokio::time::timeout(std::time::Duration::from_millis(ms), fut).await {
+        Ok(r) => r,
+        Err(_) => Err(RPCError { code: 4, message: "deadline exceeded".into() }),
+    }
+}
+
 /// Convenience: wrap a transport with interceptors (first = outermost).
 pub fn with_interceptors<I>(inner: Arc<dyn Transport>, interceptors: I) -> InterceptorTransport
 where

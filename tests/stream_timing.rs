@@ -134,3 +134,14 @@ fn gzip_roundtrip() {
     let fr = easy_rpc::protocol::frame_compressed(&orig);
     assert_ne!(fr[0] & 0x01, 0);
 }
+
+#[tokio::test]
+async fn deadline_helper_times_out() {
+    let f = async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        Ok::<_, easy_rpc::protocol::RPCError>(())
+    };
+    let r = easy_rpc::interceptors::with_deadline(50, f).await;
+    assert!(r.is_err());
+    assert_eq!(r.unwrap_err().code, 4);
+}
