@@ -108,3 +108,9 @@ fn error_json_roundtrip() {
     assert_eq!((c, m.as_str()), (7, "denied"));
     assert_eq!(easy_rpc::protocol::decode_error_json(b"plain").0, 0);
 }
+
+#[test]
+fn limits_and_version_consts() {
+    assert_eq!(easy_rpc::protocol::CONNECT_PROTOCOL_VERSION, "1");
+    assert_eq!(easy_rpc::protocol::DEFAULT_MAX_MESSAGE_BYTES, 4 * 1024 * 1024);
+}

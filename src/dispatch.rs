@@ -7,7 +7,10 @@
 //!
 //! Server-stream is written frame-by-frame: the adapter flushes each frame, so
 //! responses are truly incremental — never buffered.
-use crate::protocol::{Headers, MethodSpec, RPCError, Request, encode_end_stream, encode_error_json, frame, http_status, parse_timeout, HEADER_TIMEOUT};
+use crate::protocol::{
+    Headers, MethodSpec, RPCError, Request, encode_end_stream, encode_error_json, frame, http_status,
+    parse_timeout, HEADER_TIMEOUT, HEADER_PROTOCOL_VERSION, CONNECT_PROTOCOL_VERSION, DEFAULT_MAX_MESSAGE_BYTES,
+};
 use crate::server::ServerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -37,6 +40,15 @@ pub async fn handle(
     let path = req.url.split('?').next().unwrap_or("").to_string();
     let kind = content_kind_headers(&req.headers);
     let ct = if kind == "json" { "application/json" } else { "application/proto" };
+
+    if let Some(pv) = req.headers.get(HEADER_PROTOCOL_VERSION).and_then(|v| v.first()) {
+        if pv != CONNECT_PROTOCOL_VERSION {
+            return write_error(w.as_ref(), &RPCError { code: 12, message: format!("unsupported connect-protocol-version: {pv}") });
+        }
+    }
+    if req.body.as_ref().map(|b| b.len()).unwrap_or(0) > DEFAULT_MAX_MESSAGE_BYTES {
+        return write_error(w.as_ref(), &RPCError { code: 8, message: "request too large".into() });
+    }
 
     let spec = methods.iter().find(|m| m.path == path);
     let Some(spec) = spec else {

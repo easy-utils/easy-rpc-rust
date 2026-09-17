@@ -191,6 +191,9 @@ pub fn read_frame(buf: &[u8]) -> Option<(Vec<u8>, bool, usize)> {
     }
     let flags = buf[0];
     let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    if len > DEFAULT_MAX_MESSAGE_BYTES {
+        return None;
+    }
     if buf.len() < 5 + len {
         return None;
     }
@@ -201,6 +204,13 @@ pub fn read_frame(buf: &[u8]) -> Option<(Vec<u8>, bool, usize)> {
 
 /// The Connect request-timeout header.
 pub const HEADER_TIMEOUT: &str = "connect-timeout-ms";
+
+/// The Connect protocol-version header + the version we speak.
+pub const HEADER_PROTOCOL_VERSION: &str = "connect-protocol-version";
+pub const CONNECT_PROTOCOL_VERSION: &str = "1";
+
+/// Default read/write size cap (Connect default).
+pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Parse the Connect timeout header into milliseconds (0 = none).
 pub fn parse_timeout(value: &str) -> u64 {
