@@ -41,7 +41,7 @@ async fn collect(port: u16) -> (Vec<u8>, Option<RPCError>) {
     let mut st = t
         .open_stream(easy_rpc::protocol::Request {
             url: "/x".into(),
-            method: "POST".into(),
+            
             headers: Default::default(),
             body: None,
         })

@@ -33,7 +33,7 @@ impl Transport for HyperClient {
         let body = Full::new(req.body.unwrap_or_default());
         let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
         let mut builder = HReq::builder()
-            .method(req.method.as_str())
+            .method("POST")
             .uri(target.as_str())
             .header("host", host_of(&req.url));
         // Caller-supplied headers first; default content-type ONLY when absent.
@@ -77,7 +77,8 @@ impl Transport for HyperClient {
         } else {
             None
         };
-        Ok(Response { status, headers, body, error })
+        let (hdrs, trailers) = crate::protocol::demux_trailers(&headers);
+        Ok(Response { status, headers: hdrs, body, trailers, error })
     }
 
     async fn open_stream(&self, req: Request) -> Result<Box<dyn Stream>, RPCError> {
@@ -90,7 +91,7 @@ impl Transport for HyperClient {
         let body = Full::new(req.body.unwrap_or_default());
         let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
         let mut builder = HReq::builder()
-            .method(req.method.as_str())
+            .method("POST")
             .uri(target.as_str())
             .header("host", host_of(&req.url));
         // Caller-supplied headers first; default content-type ONLY when absent.
@@ -167,7 +168,7 @@ impl Stream for HyperStream {
                     } else { payload };
                     if flags & 0x02 != 0 {
                         self.ended = true;
-                        let (code, message, details) = crate::protocol::decode_end_stream(&payload);
+                        let (code, message, details, _metadata) = crate::protocol::decode_end_stream(&payload);
                         if code != 0 { self.err = Some(RPCError { code, message, details }); }
                         return None;
                     }

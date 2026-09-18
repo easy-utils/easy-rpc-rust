@@ -14,22 +14,22 @@ fn matrix_end_stream_decode() {
     // M2: garbage bytes => clean end, no panic
     assert_eq!(decode_end_stream(&[0xff, 0xfe, 0x00, 0x42]).0, 0);
     // M3: error without code/message => unknown code, empty message
-    let (c, m, d) = decode_end_stream(br#"{"error":{}}"#);
+    let (c, m, d, _md) = decode_end_stream(br#"{"error":{}}"#);
     assert_eq!((c, m.as_str(), d.len()), (2, "", 0));
     // M4: unknown code name => 2
-    let (c, _, _) = decode_end_stream(br#"{"error":{"code":"nope","message":"m"}}"#);
+    let (c, _, _, _md) = decode_end_stream(br#"{"error":{"code":"nope","message":"m"}}"#);
     assert_eq!(c, 2);
     // M5: unknown fields ignored
-    let (c, _, _) = decode_end_stream(br#"{"error":{"code":"not_found","message":"m"},"x":1}"#);
+    let (c, _, _, _md) = decode_end_stream(br#"{"error":{"code":"not_found","message":"m"},"x":1}"#);
     assert_eq!(c, 5);
     // M6: details round-trip (base64 -> bytes)
     let payload = encode_end_stream(8, "rate limited", &[detail()]);
-    let (c, m, d) = decode_end_stream(&payload);
+    let (c, m, d, _md) = decode_end_stream(&payload);
     assert_eq!(c, 8);
     assert_eq!(m, "rate limited");
     assert_eq!(d, vec![detail()]);
     // M7: malformed detail entries skipped, never fatal
-    let (_, _, d) = decode_end_stream(
+    let (_, _, d, _md) = decode_end_stream(
         br#"{"error":{"code":"resource_exhausted","details":[{"type":"t","value":"!!!"},{"value":"x"},{"type":"ok"},{"type":"t2","value":"AQID"}]}}"#,
     );
     assert_eq!(d, vec![ErrorDetail { type_: "t2".into(), value: vec![1, 2, 3] }]);

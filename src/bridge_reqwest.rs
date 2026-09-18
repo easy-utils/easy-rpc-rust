@@ -90,8 +90,7 @@ impl Transport for ReqwestTransport {
 
 async fn send_with(client: &Client, base: &str, req: Request) -> Result<Response, RPCError> {
     let url = join(base, &req.url);
-    let method = Method::from_bytes(req.method.as_bytes()).map_err(|e| err_box(e.to_string()))?;
-    let mut rb = client.request(method, url);
+    let mut rb = client.request(Method::POST, url);
     // Caller-supplied headers first; default content-type ONLY when absent.
     let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
     for (k, vs) in req.headers.clone() {
@@ -115,18 +114,20 @@ async fn send_with(client: &Client, base: &str, req: Request) -> Result<Response
         let (c, m, ds) = crate::protocol::decode_error_json(&bytes);
         Some(if c != 0 { RPCError { code: c, message: m, details: ds } } else { RPCError { code: connect_from_status(status), message: msg, ..Default::default() } })
     } else { None };
+    let all = reqwest_headers_to_headers(&headers);
+    let (hdrs, trailers) = crate::protocol::demux_trailers(&all);
     Ok(Response {
         status,
-        headers: reqwest_headers_to_headers(&headers),
+        headers: hdrs,
         body: bytes,
+        trailers,
         error: err,
     })
 }
 
 async fn open_stream_with(client: &Client, base: &str, req: Request) -> Result<Box<dyn Stream>, RPCError> {
     let url = join(base, &req.url);
-    let method = Method::from_bytes(req.method.as_bytes()).map_err(|e| err_box(e.to_string()))?;
-    let mut rb = client.request(method, url);
+    let mut rb = client.request(Method::POST, url);
     // Caller-supplied headers first; default content-type ONLY when absent.
     let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
     for (k, vs) in req.headers.clone() {
@@ -151,7 +152,7 @@ async fn open_stream_with(client: &Client, base: &str, req: Request) -> Result<B
             }
         }
     });
-    Ok(Box::new(ReqwestStream { rx, acc: Bytes::new(), err: None, ended: false }))
+    Ok(Box::new(ReqwestStream { rx, acc: Bytes::new(), err: None, ended: false, trailers: crate::protocol::Headers::new() }))
 }
 
 struct ReqwestStream {
@@ -159,6 +160,7 @@ struct ReqwestStream {
     acc: Bytes,
     err: Option<RPCError>,
     ended: bool,
+    trailers: crate::protocol::Headers,
 }
 
 #[async_trait::async_trait]
@@ -179,7 +181,8 @@ impl Stream for ReqwestStream {
                 } else { payload };
                 if flags & 0x02 != 0 {
                     self.ended = true;
-                    let (code, message, details) = crate::protocol::decode_end_stream(&payload);
+                    let (code, message, details, metadata) = crate::protocol::decode_end_stream(&payload);
+                    self.trailers = metadata;
                     if code != 0 {
                         self.err = Some(RPCError { code, message, details });
                     }
@@ -209,6 +212,7 @@ impl Stream for ReqwestStream {
         }
     }
     fn last_error(&self) -> Option<RPCError> { self.err.clone() }
+    fn trailers(&self) -> crate::protocol::Headers { self.trailers.clone() }
     fn cancel(&mut self) {}
     fn close(&mut self) {}
 }

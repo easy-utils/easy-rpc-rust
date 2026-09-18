@@ -15,8 +15,8 @@ use hyper::body::Frame as BodyFrame;
 use std::sync::Arc;
 
 // ---- server-side (hyper) ----
-pub type UnaryHandler = Box<dyn Fn(Vec<u8>, String, &Headers) -> Result<Vec<u8>, RPCError> + Send + Sync>;
-pub type StreamHandler = Box<dyn Fn(Vec<u8>, String, &Headers, Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>) -> Result<(), RPCError> + Send + Sync>;
+pub type UnaryHandler = Box<dyn Fn(Vec<u8>, &crate::protocol::HandlerContext) -> Result<Vec<u8>, RPCError> + Send + Sync>;
+pub type StreamHandler = Box<dyn Fn(Vec<u8>, &crate::protocol::HandlerContext, Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>) -> Result<(), RPCError> + Send + Sync>;
 
 pub struct ServerRegistry {
     pub unary: std::collections::HashMap<String, UnaryHandler>,
@@ -62,7 +62,6 @@ pub async fn hyper_serve(
 ) -> Result<hyper::Response<BoxBody<Bytes, std::io::Error>>, std::convert::Infallible> {
     let uri = req.uri().clone();
     let _path = uri.path().to_string();
-    let method = req.method().clone();
     let req_headers = req.headers().clone();
     let body = { use http_body_util::BodyExt; req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default() };
     // All request headers are forwarded (lowercased, like hyper's HeaderMap):
@@ -74,7 +73,7 @@ pub async fn hyper_serve(
         req_headers2.entry(k).or_default().push(v);
     }
     let req2 = Request {
-        url: uri.to_string(), method: method.to_string(),
+        url: uri.to_string(),
         headers: req_headers2.clone(), body: Some(bytes::Bytes::copy_from_slice(&body)),
     };
 

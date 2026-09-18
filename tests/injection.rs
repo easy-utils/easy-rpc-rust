@@ -13,7 +13,7 @@ struct FakeAdapter(Arc<Seen>);
 impl Transport for FakeAdapter {
     async fn send(&self, req: Request) -> Result<Response, protocol::RPCError> {
         self.0.lock().unwrap().push(req.headers.clone());
-        Ok(Response { status: 200, headers: Headers::new(), body: Vec::new().into(), error: None })
+        Ok(Response { status: 200, headers: Headers::new(), body: Vec::new().into(), trailers: Headers::new(), error: None })
     }
     async fn open_stream(
         &self,
@@ -32,7 +32,7 @@ async fn injected_adapter_gets_standard_interceptors() {
         vec![],
         Arc::new(FakeAdapter(seen.clone())),
     );
-    let _ = t.send(Request { url: "/x".into(), method: "POST".into(), headers: Headers::new(), body: None }).await;
+    let _ = t.send(Request { url: "/x".into(), headers: Headers::new(), body: None }).await;
     let h = &seen.lock().unwrap()[0];
     assert_eq!(
         h.get("authorization").and_then(|v| v.first()).map(String::as_str),
@@ -50,7 +50,7 @@ async fn no_opts_leaves_injected_adapter_untouched() {
     let t = connect_with_adapter("", 0, vec![], Arc::new(FakeAdapter(seen.clone())));
     let mut h = Headers::new();
     h.insert("a".into(), vec!["b".into()]);
-    let _ = t.send(Request { url: "/x".into(), method: "POST".into(), headers: h, body: None }).await;
+    let _ = t.send(Request { url: "/x".into(), headers: h, body: None }).await;
     let got = seen.lock().unwrap()[0].clone();
     assert!(!got.contains_key("authorization"));
     assert_eq!(got.get("a").and_then(|v| v.first()).map(String::as_str), Some("b"));

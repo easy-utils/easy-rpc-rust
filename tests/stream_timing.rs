@@ -32,18 +32,18 @@ impl ResponseWriter for ChanWriter {
 async fn stream_is_incremental() {
     let methods = vec![MethodSpec {
         service: "t".into(), name: "Slow".into(), path: "/t.Slow".into(),
-        http_method: "POST".into(), client_stream: false, server_stream: true, body: "".into(),
+        client_stream: false, server_stream: true,
     }];
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
     let w = Arc::new(ChanWriter { tx, status: std::sync::atomic::AtomicU16::new(200), headers: std::sync::Mutex::new(Headers::new()) });
     let ctx = easy_rpc::dispatch::RequestContext::default();
-    let req = easy_rpc::protocol::Request { url: "/t.Slow".into(), method: "POST".into(), headers: Headers::new(), body: Some(Bytes::new()) };
+    let req = easy_rpc::protocol::Request { url: "/t.Slow".into(), headers: Headers::new(), body: Some(Bytes::new()) };
 
     // Real-time async handler (sleeps, not blocks), mirroring production.
     let mut reg2 = ServerRegistry { unary: Default::default(), stream: Default::default() };
     reg2.stream.insert(
         "Slow".to_string(),
-        Box::new(|_req: Vec<u8>, _kind: String, _h: &easy_rpc::protocol::Headers, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| {
+        Box::new(|_req: Vec<u8>, _ctx: &easy_rpc::protocol::HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| {
             for i in 0..3u8 {
                 let _ = emit(vec![i]);
                 std::thread::sleep(Duration::from_millis(150));
@@ -73,7 +73,7 @@ fn timeout_helpers() {
     assert_eq!(easy_rpc::protocol::parse_timeout("0"), 0);
     assert_eq!(easy_rpc::protocol::parse_timeout("250"), 250);
     let req = easy_rpc::protocol::Request {
-        url: "/x".into(), method: "POST".into(),
+        url: "/x".into(), 
         headers: easy_rpc::protocol::Headers::new(), body: None,
     };
     let req = easy_rpc::protocol::with_timeout(req, 300);
@@ -93,7 +93,7 @@ async fn interceptor_transport_applies_metadata() {
     impl Transport for Cap {
         async fn send(&self, req: Request) -> Result<Response, RPCError> {
             *self.0.lock().unwrap() = Some(req.headers);
-            Ok(Response { status: 200, headers: Headers::new(), body: bytes::Bytes::new(), error: None })
+            Ok(Response { status: 200, headers: Headers::new(), body: bytes::Bytes::new(), trailers: Headers::new(), error: None })
         }
         async fn open_stream(&self, _req: Request) -> Result<Box<dyn Stream>, RPCError> {
             Err(RPCError { code: 12, message: "n/a".into(), ..Default::default() })
@@ -105,7 +105,7 @@ async fn interceptor_transport_applies_metadata() {
     md.insert("x-test".into(), vec!["abc".into()]);
     let inner: Arc<dyn Transport> = Arc::new(Cap(seen.clone()));
     let t = with_interceptors(inner, vec![Arc::new(MetadataInterceptor(md)) as Arc<dyn Interceptor>]);
-    let _ = t.send(Request { url: "/x".into(), method: "POST".into(), headers: Headers::new(), body: None }).await;
+    let _ = t.send(Request { url: "/x".into(), headers: Headers::new(), body: None }).await;
     let h = seen.lock().unwrap().clone().unwrap();
     assert_eq!(h.get("x-test").unwrap()[0], "abc");
 }
@@ -152,7 +152,7 @@ async fn connect_composition_root() {
     let t = connect("http://127.0.0.1:1", "abc", Mode::Auto, 60, vec![]);
     let start = std::time::Instant::now();
     let r = t.send(easy_rpc::protocol::Request {
-        url: "/x".into(), method: "POST".into(),
+        url: "/x".into(), 
         headers: easy_rpc::protocol::Headers::new(), body: None,
     }).await;
     assert!(r.is_err());

@@ -11,8 +11,8 @@ async fn echo_unary_h1() {
     let host = base.trim_start_matches("http://").to_string();
     let c = HyperClient::new(base);
     let res = c.send(easy_rpc::protocol::Request {
-        url: format!("http://{host}/v1/echo"),
-        method: "POST".into(),
+        url: format!("http://{host}/easyrpc.conformance.v1.ConformanceService/Echo"),
+        
         headers: Default::default(),
         body: Some(encode(&EchoRequest { input: "hi".into() })),
     }).await.expect("send");
@@ -27,10 +27,10 @@ async fn count_stream_h1() {
     let host = base.trim_start_matches("http://").to_string();
     let c = HyperClient::new(base);
     let mut st = c.open_stream(easy_rpc::protocol::Request {
-        url: format!("http://{host}/v1/count"),
-        method: "POST".into(),
+        url: format!("http://{host}/easyrpc.conformance.v1.ConformanceService/Count"),
+        
         headers: Default::default(),
-        body: Some(encode(&CountRequest { count: 3 })),
+        body: Some(easy_rpc::protocol::frame(&encode(&CountRequest { count: 3 }), false).into()),
     }).await.expect("open");
     let mut idx = Vec::new();
     while let Some(b) = st.recv().await {
@@ -45,8 +45,8 @@ async fn fail_details_unary_error_carries_details_h1() {
     let host = base.trim_start_matches("http://").to_string();
     let c = HyperClient::new(base);
     let res = c.send(easy_rpc::protocol::Request {
-        url: format!("http://{host}/v1/fail-details"),
-        method: "POST".into(),
+        url: format!("http://{host}/easyrpc.conformance.v1.ConformanceService/FailDetails"),
+        
         headers: Default::default(),
         body: Some(encode(&FailDetailsRequest {
             code: 8,

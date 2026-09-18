@@ -10,7 +10,6 @@ pub type Headers = BTreeMap<String, Vec<String>>;
 #[derive(Clone, Debug)]
 pub struct Request {
     pub url: String,
-    pub method: String,
     pub headers: Headers,
     pub body: Option<Bytes>,
 }
@@ -21,6 +20,8 @@ pub struct Response {
     pub status: u16,
     pub headers: Headers,
     pub body: Bytes,
+    /// Unary trailing metadata (demuxed from `trailer-*` response headers).
+    pub trailers: Headers,
     pub error: Option<RPCError>,
 }
 
@@ -67,6 +68,8 @@ pub trait Stream: Send {
     async fn recv(&mut self) -> Option<Bytes>;
     /// Set when the stream ended with a Connect end-stream error.
     fn last_error(&self) -> Option<RPCError> { None }
+    /// Trailing metadata from the END frame (available after the stream ends).
+    fn trailers(&self) -> Headers { Headers::new() }
     fn cancel(&mut self);
     fn close(&mut self);
 }
@@ -177,14 +180,31 @@ fn parse_wire_details(v: Option<&serde_json::Value>) -> Vec<ErrorDetail> {
 /// `{"error":{"code":"<name>","message":"..."}}`; a clean end is empty.
 /// Details (spec §4.1) are included when non-empty.
 pub fn encode_end_stream(code: i32, message: &str, details: &[ErrorDetail]) -> Vec<u8> {
-    if code == 0 {
-        return Vec::new();
+    encode_end_stream_meta(code, message, details, &Headers::new())
+}
+
+/// Like `encode_end_stream` but also carries trailing metadata (spec §3.3).
+/// A clean end with no metadata still serializes as `{}` (Connect requires
+/// valid JSON on the END frame).
+pub fn encode_end_stream_meta(code: i32, message: &str, details: &[ErrorDetail], metadata: &Headers) -> Vec<u8> {
+    let mut obj = serde_json::Map::new();
+    if code != 0 {
+        let mut err = serde_json::json!({"code": code_to_string(code), "message": message});
+        if !details.is_empty() {
+            err["details"] = serde_json::Value::Array(wire_details(details));
+        }
+        obj.insert("error".to_string(), err);
     }
-    let mut err = serde_json::json!({"code": code_to_string(code), "message": message});
-    if !details.is_empty() {
-        err["details"] = serde_json::Value::Array(wire_details(details));
+    if !metadata.is_empty() {
+        let md: serde_json::Map<String, serde_json::Value> = metadata.iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| (k.clone(), serde_json::Value::Array(v.iter().map(|x| serde_json::Value::String(x.clone())).collect())))
+            .collect();
+        if !md.is_empty() {
+            obj.insert("metadata".to_string(), serde_json::Value::Object(md));
+        }
     }
-    serde_json::to_vec(&serde_json::json!({"error": err})).unwrap_or_default()
+    serde_json::to_vec(&serde_json::Value::Object(obj)).unwrap_or_default()
 }
 
 // ---- gzip (opt-in) ----
@@ -248,19 +268,29 @@ pub fn decode_error_json(body: &[u8]) -> (i32, String, Vec<ErrorDetail>) {
 /// Decode a Connect end-stream payload. `(0, "")` = clean end; malformed
 /// input is a clean end (matrix M2), and an error object without a code maps
 /// to code 2 (M3/M4). Unknown fields are ignored (M5).
-pub fn decode_end_stream(payload: &[u8]) -> (i32, String, Vec<ErrorDetail>) {
+pub fn decode_end_stream(payload: &[u8]) -> (i32, String, Vec<ErrorDetail>, Headers) {
     if payload.is_empty() {
-        return (0, String::new(), Vec::new());
+        return (0, String::new(), Vec::new(), Headers::new());
     }
-    let v: serde_json::Value = match serde_json::from_slice(payload) { Ok(v) => v, Err(_) => return (0, String::new(), Vec::new()) };
-    let err = match v.get("error") { Some(e) => e, None => return (0, String::new(), Vec::new()) };
+    let v: serde_json::Value = match serde_json::from_slice(payload) { Ok(v) => v, Err(_) => return (0, String::new(), Vec::new(), Headers::new()) };
+    let mut metadata = Headers::new();
+    if let Some(md) = v.get("metadata").and_then(|x| x.as_object()) {
+        for (k, val) in md {
+            if let Some(arr) = val.as_array() {
+                let vs: Vec<String> = arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+                if !vs.is_empty() { metadata.insert(k.clone(), vs); }
+            }
+        }
+    }
+    let err = match v.get("error") { Some(e) => e, None => return (0, String::new(), Vec::new(), metadata) };
     let code = match err.get("code").and_then(|x| x.as_str()) {
         Some(c) => code_from_string(c),
         None => 2,
     };
     (code,
      err.get("message").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-     parse_wire_details(err.get("details")))
+     parse_wire_details(err.get("details")),
+     metadata)
 }
 
 // Minimal, dependency-free base64 (standard alphabet, padded) for error
@@ -393,10 +423,8 @@ pub struct MethodSpec {
     pub service: String,
     pub name: String,
     pub path: String,
-    pub http_method: String,
     pub client_stream: bool,
     pub server_stream: bool,
-    pub body: String,
 }
 
 /// Encode a prost message to bytes.
@@ -406,4 +434,64 @@ pub fn encode<M: Message>(m: &M) -> Bytes {
 /// Decode bytes into a prost message.
 pub fn decode<M: Message + Default>(b: &[u8]) -> Result<M, std::io::Error> {
     <M as Message>::decode(b).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+
+/// Trailer prefix for unary trailing metadata on response headers.
+pub const TRAILER_PREFIX: &str = "trailer-";
+
+/// Proto-only content types.
+pub const CONTENT_TYPE_UNARY: &str = "application/proto";
+pub const CONTENT_TYPE_STREAM: &str = "application/connect+proto";
+
+/// Merge trailing metadata into response headers (`trailer-<key>`).
+pub fn mux_trailers(headers: &Headers, trailers: &Headers) -> Headers {
+    let mut out = headers.clone();
+    for (k, v) in trailers {
+        out.insert(format!("{}{}", TRAILER_PREFIX, k.to_lowercase()), v.clone());
+    }
+    out
+}
+
+/// Split response headers into (headers, trailers) by the `trailer-` prefix.
+pub fn demux_trailers(all: &Headers) -> (Headers, Headers) {
+    let mut h = Headers::new();
+    let mut t = Headers::new();
+    for (k, v) in all {
+        let lk = k.to_lowercase();
+        if let Some(rest) = lk.strip_prefix(TRAILER_PREFIX) {
+            t.insert(rest.to_string(), v.clone());
+        } else {
+            h.insert(k.clone(), v.clone());
+        }
+    }
+    (h, t)
+}
+
+/// Read exactly one frame (the enveloped server-stream request message).
+pub fn read_single_frame(body: &[u8]) -> Result<Vec<u8>, RPCError> {
+    match read_frame(body) {
+        Some((payload, _end, _used)) => Ok(payload),
+        None => Err(RPCError::new(13, "stream request: truncated frame")),
+    }
+}
+
+/// Per-RPC handler context: request metadata + a trailing-metadata channel.
+#[derive(Debug, Default, Clone)]
+pub struct HandlerContext {
+    pub headers: Headers,
+    trailers_internal: std::sync::Arc<std::sync::Mutex<Headers>>,
+}
+
+impl HandlerContext {
+    pub fn new(headers: Headers) -> Self {
+        Self { headers, trailers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())) }
+    }
+    /// Record a trailing-metadata entry.
+    pub fn set_trailer(&self, key: &str, value: &str) {
+        self.trailers_internal.lock().unwrap().entry(key.to_string()).or_default().push(value.to_string());
+    }
+    pub fn trailers(&self) -> Headers {
+        self.trailers_internal.lock().unwrap().clone()
+    }
 }

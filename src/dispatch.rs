@@ -8,9 +8,10 @@
 //! Server-stream is written frame-by-frame: the adapter flushes each frame, so
 //! responses are truly incremental — never buffered.
 use crate::protocol::{
-    Headers, MethodSpec, RPCError, Request, encode_end_stream, encode_error_json, frame, http_status,
+    Headers, MethodSpec, RPCError, Request, encode_end_stream_meta, encode_error_json, frame, http_status,
     parse_timeout, HEADER_TIMEOUT, HEADER_PROTOCOL_VERSION, CONNECT_PROTOCOL_VERSION, DEFAULT_MAX_MESSAGE_BYTES,
     HEADER_ACCEPT_ENCODING, ENCODING_GZIP, COMPRESS_MIN_BYTES, gzip_compress, frame_compressed,
+    CONTENT_TYPE_UNARY, CONTENT_TYPE_STREAM, mux_trailers, read_single_frame, HandlerContext,
 };
 use crate::server::ServerRegistry;
 use std::collections::BTreeMap;
@@ -39,8 +40,6 @@ pub async fn handle(
     w: Arc<dyn ResponseWriter>,
 ) {
     let path = req.url.split('?').next().unwrap_or("").to_string();
-    let kind = content_kind_headers(&req.headers);
-    let ct = if kind == "json" { "application/json" } else { "application/proto" };
 
     if let Some(pv) = req.headers.get(HEADER_PROTOCOL_VERSION).and_then(|v| v.first()) {
         if pv != CONNECT_PROTOCOL_VERSION {
@@ -56,6 +55,16 @@ pub async fn handle(
         return write_error(w.as_ref(), &RPCError { code: 5, message: "not found".into(), ..Default::default() });
     };
 
+    // proto-only content type (spec §2).
+    let want = if spec.server_stream { CONTENT_TYPE_STREAM } else { CONTENT_TYPE_UNARY };
+    let got = req.headers.get("content-type").and_then(|v| v.first())
+        .map(|s| s.split(';').next().unwrap_or("").trim().to_lowercase()).unwrap_or_default();
+    if got != want {
+        return write_error_status(w.as_ref(), &RPCError::new(3, format!("unsupported content-type: expected {want}")), 415);
+    }
+
+    let ctx = HandlerContext::new(req.headers.clone());
+
     if spec.server_stream {
         let Some(h) = reg.stream.get(&spec.name) else {
             return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
@@ -65,9 +74,14 @@ pub async fn handle(
         let mut headers = BTreeMap::new();
         headers.insert(
             "content-type".to_string(),
-            vec![if kind == "json" { "application/connect+json" } else { "application/connect+proto" }.to_string()],
+            vec![CONTENT_TYPE_STREAM.to_string()],
         );
         w.header(headers);
+        // Unframe the enveloped single-request frame.
+        let req_body = match read_single_frame(req.body.as_deref().unwrap_or(&[])) {
+            Ok(b) => b,
+            Err(e) => return write_error(w.as_ref(), &e),
+        };
         let wants_gzip = req
             .headers
             .get(HEADER_ACCEPT_ENCODING)
@@ -85,33 +99,58 @@ pub async fn handle(
             }
             wc.write_frame(frame(&p, false))
         });
-        let result = h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), &req.headers, emit);
+        let result = h(req_body, &ctx, emit);
         if ended.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
+        ended.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Err(e) = result {
-            ended.store(true, std::sync::atomic::Ordering::SeqCst);
-            let _ = w.write_frame(frame(&encode_end_stream(e.code, &e.message, &e.details), true));
+            let _ = w.write_frame(frame(&encode_end_stream_meta(e.code, &e.message, &e.details, &ctx.trailers()), true));
             return;
         }
-        ended.store(true, std::sync::atomic::Ordering::SeqCst);
-        let _ = w.write_frame(frame(&[], true));
+        let _ = w.write_frame(frame(&encode_end_stream_meta(0, "", &[], &ctx.trailers()), true));
         return;
     }
 
     let Some(h) = reg.unary.get(&spec.name) else {
         return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
     };
-    match h(req.body.clone().unwrap_or_default().to_vec(), kind.clone(), &req.headers) {
+    match h(req.body.clone().unwrap_or_default().to_vec(), &ctx) {
         Ok(out) => {
             w.status(200);
+            let wants_gzip = req
+                .headers
+                .get("accept-encoding")
+                .map(|vs| vs.iter().any(|v| v.split(',').any(|e| e.trim() == ENCODING_GZIP)))
+                .unwrap_or(false);
             let mut headers = BTreeMap::new();
-            headers.insert("content-type".to_string(), vec![ct.to_string()]);
+            let body = if wants_gzip && out.len() >= COMPRESS_MIN_BYTES {
+                headers.insert("content-encoding".to_string(), vec![ENCODING_GZIP.to_string()]);
+                gzip_compress(&out)
+            } else {
+                out
+            };
+            headers = mux_trailers(&headers, &ctx.trailers());
+            headers.insert("content-type".to_string(), vec![CONTENT_TYPE_UNARY.to_string()]);
             w.header(headers);
-            let _ = w.write_frame(out);
+            let _ = w.write_frame(body);
         }
-        Err(e) => write_error(w.as_ref(), &e),
+        Err(e) => {
+            let mut headers = Headers::new();
+            headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
+            w.status(http_status(e.code));
+            w.header(mux_trailers(&headers, &ctx.trailers()));
+            let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
+        }
     }
+}
+
+fn write_error_status(w: &dyn ResponseWriter, e: &RPCError, status: u16) {
+    w.status(status);
+    let mut headers = BTreeMap::new();
+    headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
+    w.header(headers);
+    let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
 }
 
 fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
@@ -145,12 +184,3 @@ impl RequestContext {
     }
 }
 
-fn content_kind_headers(h: &crate::protocol::Headers) -> String {
-    if let Some(ct) = h.get("content-type").and_then(|v| v.first()) {
-        if ct.starts_with("application/json") || ct.starts_with("application/connect+json") { return "json".to_string() }
-    }
-    if let Some(ac) = h.get("accept").and_then(|v| v.first()) {
-        if ac.starts_with("application/json") || ac.starts_with("application/connect+json") { return "json".to_string() }
-    }
-    "proto".to_string()
-}
