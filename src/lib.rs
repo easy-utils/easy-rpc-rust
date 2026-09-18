@@ -17,6 +17,13 @@ pub mod google {
         include!("google/api/google.api.rs");
     }
 }
+pub mod connectrpc {
+    pub mod conformance {
+        pub mod v1 {
+            include!("connectrpc/conformance/v1/mod.rs");
+        }
+    }
+}
 pub mod easyrpc {
     pub mod conformance {
         pub mod v1 {

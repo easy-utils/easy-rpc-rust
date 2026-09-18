@@ -37,7 +37,15 @@ async fn stream_is_incremental() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
     let w = Arc::new(ChanWriter { tx, status: std::sync::atomic::AtomicU16::new(200), headers: std::sync::Mutex::new(Headers::new()) });
     let ctx = easy_rpc::dispatch::RequestContext::default();
-    let req = easy_rpc::protocol::Request { url: "/t.Slow".into(), headers: Headers::new(), body: Some(Bytes::new()) };
+    // A valid server-stream request: proto content type + exactly one enveloped
+    // (empty) request message.
+    let mut req_headers = Headers::new();
+    req_headers.insert("content-type".to_string(), vec!["application/connect+proto".to_string()]);
+    let req = easy_rpc::protocol::Request {
+        url: "/t.Slow".into(),
+        headers: req_headers,
+        body: Some(Bytes::from(vec![0u8, 0, 0, 0, 0])),
+    };
 
     // Real-time async handler (sleeps, not blocks), mirroring production.
     let mut reg2 = ServerRegistry { unary: Default::default(), stream: Default::default() };

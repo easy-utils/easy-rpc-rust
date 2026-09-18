@@ -8,14 +8,42 @@
 //! Server-stream is written frame-by-frame: the adapter flushes each frame, so
 //! responses are truly incremental — never buffered.
 use crate::protocol::{
-    Headers, MethodSpec, RPCError, Request, encode_end_stream_meta, encode_error_json, frame, http_status,
-    parse_timeout, HEADER_TIMEOUT, HEADER_PROTOCOL_VERSION, CONNECT_PROTOCOL_VERSION, DEFAULT_MAX_MESSAGE_BYTES,
-    HEADER_ACCEPT_ENCODING, ENCODING_GZIP, COMPRESS_MIN_BYTES, gzip_compress, frame_compressed,
-    CONTENT_TYPE_UNARY, CONTENT_TYPE_STREAM, mux_trailers, read_single_frame, HandlerContext,
+    Headers, MethodSpec, RPCError, Request, encode_end_stream_meta, encode_error_json, frame, frame_compressed,
+    http_status, parse_timeout, gzip_decompress, HEADER_TIMEOUT, HEADER_PROTOCOL_VERSION, CONNECT_PROTOCOL_VERSION,
+    DEFAULT_MAX_MESSAGE_BYTES, HEADER_ACCEPT_ENCODING, ENCODING_GZIP, COMPRESS_MIN_BYTES, gzip_compress,
+    CONTENT_TYPE_UNARY, CONTENT_TYPE_STREAM, mux_trailers, read_frame, HandlerContext,
 };
 use crate::server::ServerRegistry;
-use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// Merge handler-set response headers into a base map (base keys win, handler
+/// values are appended so multi-value headers survive).
+fn merge_response_headers(base: Headers, extra: &Headers) -> Headers {
+    let mut out = base;
+    for (k, vs) in extra {
+        out.entry(k.clone()).or_default().extend(vs.iter().cloned());
+    }
+    out
+}
+
+/// Count the frames in an enveloped request body. Returns Err on a corrupt
+/// header.
+fn count_frames(body: &[u8]) -> Result<usize, RPCError> {
+    let mut off = 0usize;
+    let mut n = 0usize;
+    while off < body.len() {
+        if off + 5 > body.len() {
+            return Err(RPCError::new(13, "truncated frame header"));
+        }
+        let len = u32::from_be_bytes([body[off + 1], body[off + 2], body[off + 3], body[off + 4]]) as usize;
+        if len > DEFAULT_MAX_MESSAGE_BYTES {
+            return Err(RPCError::new(8, "frame too large"));
+        }
+        off += 5 + len;
+        n += 1;
+    }
+    Ok(n)
+}
 
 /// Push-based server sink. Adapters implement this for their transport.
 pub trait ResponseWriter: Send + Sync {
@@ -42,57 +70,94 @@ pub async fn handle(
     let path = req.url.split('?').next().unwrap_or("").to_string();
 
     if let Some(pv) = req.headers.get(HEADER_PROTOCOL_VERSION).and_then(|v| v.first()) {
-        if pv != CONNECT_PROTOCOL_VERSION {
+        if !pv.is_empty() && pv != CONNECT_PROTOCOL_VERSION {
             return write_error(w.as_ref(), &RPCError { code: 12, message: format!("unsupported connect-protocol-version: {pv}"), ..Default::default() });
         }
     }
+
+    // POST-only (spec §0). A non-POST verb is 405 (code 2).
+    if let Some(m) = req.headers.get(":method").and_then(|v| v.first()) {
+        if !m.is_empty() && m != "POST" {
+            return write_error_status(w.as_ref(), &RPCError::new(2, format!("method {m} not allowed")), 405);
+        }
+    }
+
     if req.body.as_ref().map(|b| b.len()).unwrap_or(0) > DEFAULT_MAX_MESSAGE_BYTES {
         return write_error(w.as_ref(), &RPCError { code: 8, message: "request too large".into(), ..Default::default() });
     }
 
     let spec = methods.iter().find(|m| m.path == path);
+    // Unknown path -> 404 with code 12 (unimplemented), matching Connect.
     let Some(spec) = spec else {
-        return write_error(w.as_ref(), &RPCError { code: 5, message: "not found".into(), ..Default::default() });
+        return write_error_status(w.as_ref(), &RPCError::new(12, "unimplemented"), 404);
     };
 
-    // proto-only content type (spec §2).
+    // proto-only content type (spec §2). Unknown content type -> 415 (code 2).
     let want = if spec.server_stream { CONTENT_TYPE_STREAM } else { CONTENT_TYPE_UNARY };
     let got = req.headers.get("content-type").and_then(|v| v.first())
         .map(|s| s.split(';').next().unwrap_or("").trim().to_lowercase()).unwrap_or_default();
     if got != want {
-        return write_error_status(w.as_ref(), &RPCError::new(3, format!("unsupported content-type: expected {want}")), 415);
+        return write_error_status(w.as_ref(), &RPCError::new(2, format!("unsupported content-type: expected {want}")), 415);
     }
 
     let ctx = HandlerContext::new(req.headers.clone());
 
     if spec.server_stream {
         let Some(h) = reg.stream.get(&spec.name) else {
-            return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
+            return stream_fail(w.as_ref(), &RPCError::new(12, "no handler"));
         };
-        // Connect semantics: stream is always HTTP 200; failures ride the END frame.
+        // Request compression for streams uses `connect-content-encoding`.
+        let req_enc = req.headers.get("connect-content-encoding").and_then(|v| v.first())
+            .map(|s| s.trim().to_lowercase()).unwrap_or_default();
+        if !req_enc.is_empty() && req_enc != "identity" && req_enc != ENCODING_GZIP {
+            return stream_fail(w.as_ref(), &RPCError::new(12, format!("unsupported content-encoding: {req_enc}")));
+        }
+        // A server-stream request MUST carry exactly one enveloped message;
+        // zero frames or more than one => unimplemented (Connect semantics).
+        let frame_count = match count_frames(req.body.as_deref().unwrap_or(&[])) {
+            Ok(n) => n,
+            Err(e) => return stream_fail(w.as_ref(), &e),
+        };
+        if frame_count != 1 {
+            let msg = if frame_count == 0 { "missing request message" } else { "server-stream request must contain exactly one message" };
+            return stream_fail(w.as_ref(), &RPCError::new(12, msg));
+        }
+        // Unframe the enveloped single-request frame (decompress if flagged).
+        let req_body = match read_frame(req.body.as_deref().unwrap_or(&[])) {
+            Some((payload, _end, _used)) => {
+                if req.body.as_deref().unwrap_or(&[]).first().map(|f| f & 0x01 != 0).unwrap_or(false) {
+                    match gzip_decompress(&payload) {
+                        Ok(p) => p,
+                        Err(e) => return stream_fail(w.as_ref(), &e),
+                    }
+                } else {
+                    payload
+                }
+            }
+            None => return stream_fail(w.as_ref(), &RPCError::new(13, "stream request: truncated frame")),
+        };
+        // Connect semantics: stream is always HTTP 200; failures ride the END
+        // frame. Handler-set headers are applied lazily on the first emit.
         w.status(200);
-        let mut headers = BTreeMap::new();
-        headers.insert(
-            "content-type".to_string(),
-            vec![CONTENT_TYPE_STREAM.to_string()],
-        );
-        w.header(headers);
-        // Unframe the enveloped single-request frame.
-        let req_body = match read_single_frame(req.body.as_deref().unwrap_or(&[])) {
-            Ok(b) => b,
-            Err(e) => return write_error(w.as_ref(), &e),
-        };
         let wants_gzip = req
             .headers
             .get(HEADER_ACCEPT_ENCODING)
             .map(|vs| vs.iter().any(|v| v.split(',').any(|e| e.trim() == ENCODING_GZIP)))
             .unwrap_or(false);
-        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let applied = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let end_flag = ended.clone();
+        let applied_flag = applied.clone();
         let wc = w.clone();
+        let ctxc = ctx.clone();
         let emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync> = Box::new(move |p: Vec<u8>| {
             if end_flag.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(());
+            }
+            if !applied_flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let mut base = Headers::new();
+                base.insert("content-type".to_string(), vec![CONTENT_TYPE_STREAM.to_string()]);
+                wc.header(merge_response_headers(base, &ctxc.response_headers()));
             }
             if wants_gzip && p.len() >= COMPRESS_MIN_BYTES {
                 return wc.write_frame(frame_compressed(&gzip_compress(&p)));
@@ -100,6 +165,12 @@ pub async fn handle(
             wc.write_frame(frame(&p, false))
         });
         let result = h(req_body, &ctx, emit);
+        // Ensure headers are set even for an empty successful stream.
+        if !applied.load(std::sync::atomic::Ordering::SeqCst) {
+            let mut base = Headers::new();
+            base.insert("content-type".to_string(), vec![CONTENT_TYPE_STREAM.to_string()]);
+            w.header(merge_response_headers(base, &ctx.response_headers()));
+        }
         if ended.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
@@ -115,15 +186,28 @@ pub async fn handle(
     let Some(h) = reg.unary.get(&spec.name) else {
         return write_error(w.as_ref(), &RPCError { code: 5, message: "method not found".into(), ..Default::default() });
     };
-    match h(req.body.clone().unwrap_or_default().to_vec(), &ctx) {
+    // Request compression (spec §3.5): unary uses `Content-Encoding: gzip`.
+    let mut in_body = req.body.clone().unwrap_or_default().to_vec();
+    let req_enc = req.headers.get("content-encoding").and_then(|v| v.first())
+        .map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    if !req_enc.is_empty() && req_enc != ENCODING_GZIP {
+        return write_error(w.as_ref(), &RPCError::new(12, format!("unsupported content-encoding: {req_enc}")));
+    }
+    if req_enc == ENCODING_GZIP && !in_body.is_empty() {
+        match gzip_decompress(&in_body) {
+            Ok(b) => in_body = b,
+            Err(e) => return write_error(w.as_ref(), &e),
+        }
+    }
+    match h(in_body, &ctx) {
         Ok(out) => {
             w.status(200);
             let wants_gzip = req
                 .headers
-                .get("accept-encoding")
+                .get(HEADER_ACCEPT_ENCODING)
                 .map(|vs| vs.iter().any(|v| v.split(',').any(|e| e.trim() == ENCODING_GZIP)))
                 .unwrap_or(false);
-            let mut headers = BTreeMap::new();
+            let mut headers = Headers::new();
             let body = if wants_gzip && out.len() >= COMPRESS_MIN_BYTES {
                 headers.insert("content-encoding".to_string(), vec![ENCODING_GZIP.to_string()]);
                 gzip_compress(&out)
@@ -131,6 +215,7 @@ pub async fn handle(
                 out
             };
             headers = mux_trailers(&headers, &ctx.trailers());
+            headers = merge_response_headers(headers, &ctx.response_headers());
             headers.insert("content-type".to_string(), vec![CONTENT_TYPE_UNARY.to_string()]);
             w.header(headers);
             let _ = w.write_frame(body);
@@ -139,15 +224,25 @@ pub async fn handle(
             let mut headers = Headers::new();
             headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
             w.status(http_status(e.code));
+            headers = merge_response_headers(headers, &ctx.response_headers());
             w.header(mux_trailers(&headers, &ctx.trailers()));
             let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
         }
     }
 }
 
+/// Emit a server-stream failure: HTTP 200 + END frame carrying the error.
+fn stream_fail(w: &dyn ResponseWriter, e: &RPCError) {
+    w.status(200);
+    let mut headers = Headers::new();
+    headers.insert("content-type".to_string(), vec![CONTENT_TYPE_STREAM.to_string()]);
+    w.header(headers);
+    let _ = w.write_frame(frame(&encode_end_stream_meta(e.code, &e.message, &e.details, &Headers::new()), true));
+}
+
 fn write_error_status(w: &dyn ResponseWriter, e: &RPCError, status: u16) {
     w.status(status);
-    let mut headers = BTreeMap::new();
+    let mut headers = Headers::new();
     headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
     w.header(headers);
     let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
@@ -155,7 +250,7 @@ fn write_error_status(w: &dyn ResponseWriter, e: &RPCError, status: u16) {
 
 fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
     w.status(http_status(e.code));
-    let mut headers = BTreeMap::new();
+    let mut headers = Headers::new();
     headers.insert("content-type".to_string(), vec!["application/json".to_string()]);
     w.header(headers);
     let _ = w.write_frame(encode_error_json(e.code, &e.message, &e.details));
@@ -165,13 +260,13 @@ fn write_error(w: &dyn ResponseWriter, e: &RPCError) {
 /// easy-rpc only guarantees it carries the incoming headers for authz.
 #[derive(Debug, Default, Clone)]
 pub struct RequestContext {
-    pub headers: BTreeMap<String, Vec<String>>,
+    pub headers: Headers,
     /// Connect deadline in milliseconds (0 = none).
     pub deadline_ms: u64,
 }
 
 impl RequestContext {
-    pub fn new(headers: BTreeMap<String, Vec<String>>) -> Self {
+    pub fn new(headers: Headers) -> Self {
         let deadline_ms = headers
             .get(HEADER_TIMEOUT)
             .and_then(|v| v.first())

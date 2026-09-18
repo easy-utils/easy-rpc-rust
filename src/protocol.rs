@@ -293,8 +293,8 @@ pub fn decode_end_stream(payload: &[u8]) -> (i32, String, Vec<ErrorDetail>, Head
      metadata)
 }
 
-// Minimal, dependency-free base64 (standard alphabet, padded) for error
-// details; details are small so a simple table decoder is fine.
+// Minimal, dependency-free base64 (standard alphabet, UNPADDED — Connect
+// error-detail `value` uses base64.RawStdEncoding) for error details.
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 pub fn b64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -302,8 +302,8 @@ pub fn b64_encode(data: &[u8]) -> String {
         let n = ((chunk[0] as u32) << 16) | ((*chunk.get(1).unwrap_or(&0) as u32) << 8) | (*chunk.get(2).unwrap_or(&0) as u32);
         out.push(B64[(n >> 18) as usize & 63] as char);
         out.push(B64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+        if chunk.len() > 1 { out.push(B64[(n >> 6) as usize & 63] as char); }
+        if chunk.len() > 2 { out.push(B64[n as usize & 63] as char); }
     }
     out
 }
@@ -311,7 +311,9 @@ pub fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let mut buf: u32 = 0;
     let mut bits = 0u32;
-    if s.len() % 4 != 0 { return None; }
+    // Accept both padded and unpadded standard base64 (length%4 == 1 is invalid).
+    let s = s.trim_end_matches('=');
+    if s.len() % 4 == 1 { return None; }
     for c in s.bytes() {
         let v = match c {
             b'A'..=b'Z' => c - b'A',
@@ -476,16 +478,30 @@ pub fn read_single_frame(body: &[u8]) -> Result<Vec<u8>, RPCError> {
     }
 }
 
-/// Per-RPC handler context: request metadata + a trailing-metadata channel.
+/// Per-RPC handler context: request metadata + response header/trailer
+/// channels. Both are append-semantics multi-maps (spec §3.3).
 #[derive(Debug, Default, Clone)]
 pub struct HandlerContext {
     pub headers: Headers,
     trailers_internal: std::sync::Arc<std::sync::Mutex<Headers>>,
+    headers_internal: std::sync::Arc<std::sync::Mutex<Headers>>,
 }
 
 impl HandlerContext {
     pub fn new(headers: Headers) -> Self {
-        Self { headers, trailers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())) }
+        Self {
+            headers,
+            trailers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())),
+            headers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())),
+        }
+    }
+    /// Append a response-header entry (multi-value; not overwritten).
+    pub fn set_header(&self, key: &str, value: &str) {
+        self.headers_internal.lock().unwrap().entry(key.to_lowercase()).or_default().push(value.to_string());
+    }
+    /// Response headers recorded by the handler.
+    pub fn response_headers(&self) -> Headers {
+        self.headers_internal.lock().unwrap().clone()
     }
     /// Record a trailing-metadata entry.
     pub fn set_trailer(&self, key: &str, value: &str) {

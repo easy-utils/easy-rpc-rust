@@ -65,6 +65,7 @@ pub async fn hyper_serve(
     // populated (`http://host/path`); the dispatcher matches on the path.
     let path_only = uri.path().to_string();
     let req_headers = req.headers().clone();
+    let method = req.method().as_str().to_string();
     let body = { use http_body_util::BodyExt; req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default() };
     // All request headers are forwarded (lowercased, like hyper's HeaderMap):
     // handlers read auth/metadata via the Headers argument.
@@ -74,6 +75,8 @@ pub async fn hyper_serve(
         let v = value.to_str().unwrap_or("").to_string();
         req_headers2.entry(k).or_default().push(v);
     }
+    // Surface the request verb so dispatch can enforce POST-only (405).
+    req_headers2.insert(":method".to_string(), vec![method]);
     let req2 = Request {
         url: path_only,
         headers: req_headers2.clone(), body: Some(bytes::Bytes::copy_from_slice(&body)),
