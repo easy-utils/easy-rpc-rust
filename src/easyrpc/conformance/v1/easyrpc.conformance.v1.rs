@@ -40,6 +40,48 @@ pub struct HealthResponse {
     #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
+// ---- bytes / deadline / empty / big-stream ----
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EchoBytesRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EchoBytesResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SleepRequest {
+    #[prost(int32, tag = "1")]
+    pub millis: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SleepResponse {
+    #[prost(bool, tag = "1")]
+    pub ok: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EmptyRequest {
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EmptyResponse {
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BigStreamRequest {
+    #[prost(int32, tag = "1")]
+    pub count: i32,
+    #[prost(int32, tag = "2")]
+    pub size: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BigStreamResponse {
+    #[prost(int32, tag = "1")]
+    pub index: i32,
+    #[prost(int32, tag = "2")]
+    pub size: i32,
+}
 // ---- stream-end error + metadata + big payload ----
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

@@ -61,7 +61,9 @@ pub async fn hyper_serve(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<BoxBody<Bytes, std::io::Error>>, std::convert::Infallible> {
     let uri = req.uri().clone();
-    let _path = uri.path().to_string();
+    // Use origin-form path only: with h2c prior-knowledge the URI authority is
+    // populated (`http://host/path`); the dispatcher matches on the path.
+    let path_only = uri.path().to_string();
     let req_headers = req.headers().clone();
     let body = { use http_body_util::BodyExt; req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default() };
     // All request headers are forwarded (lowercased, like hyper's HeaderMap):
@@ -73,7 +75,7 @@ pub async fn hyper_serve(
         req_headers2.entry(k).or_default().push(v);
     }
     let req2 = Request {
-        url: uri.to_string(),
+        url: path_only,
         headers: req_headers2.clone(), body: Some(bytes::Bytes::copy_from_slice(&body)),
     };
 

@@ -18,12 +18,19 @@ pub struct HyperClient {
 
 impl HyperClient {
     pub fn new(base: String) -> Self { Self { base } }
-    pub fn url(&self, path: &str) -> String { format!("{}{}", self.base, path) }
+    pub fn url(&self, path: &str) -> String {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            path.to_string()
+        } else {
+            format!("{}{}", self.base.trim_end_matches('/'), path)
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl Transport for HyperClient {
-    async fn send(&self, req: Request) -> Result<Response, RPCError> {
+    async fn send(&self, mut req: Request) -> Result<Response, RPCError> {
+        req.url = self.url(&req.url);
         let conn = connect(&req.url).await?;
         let (mut sender, mut conn2) = conn;
         tokio::spawn(async move {
@@ -81,7 +88,8 @@ impl Transport for HyperClient {
         Ok(Response { status, headers: hdrs, body, trailers, error })
     }
 
-    async fn open_stream(&self, req: Request) -> Result<Box<dyn Stream>, RPCError> {
+    async fn open_stream(&self, mut req: Request) -> Result<Box<dyn Stream>, RPCError> {
+        req.url = self.url(&req.url);
         let conn = connect(&req.url).await?;
         let (mut sender, mut conn2) = conn;
         tokio::spawn(async move {
@@ -111,7 +119,7 @@ impl Transport for HyperClient {
         if parts.status.as_u16() >= 300 {
             return Err(RPCError { code: connect_from_status(parts.status.as_u16()), message: "http error".to_string(), ..Default::default() });
         }
-        Ok(Box::new(HyperStream { incoming, buf: Vec::new(), err: None, ended: false }))
+        Ok(Box::new(HyperStream { incoming, buf: Vec::new(), err: None, ended: false, trailers: crate::protocol::Headers::new() }))
     }
 }
 
@@ -144,6 +152,7 @@ struct HyperStream {
     buf: Vec<u8>,
     err: Option<RPCError>,
     ended: bool,
+    trailers: crate::protocol::Headers,
 }
 
 #[async_trait::async_trait]
@@ -168,7 +177,8 @@ impl Stream for HyperStream {
                     } else { payload };
                     if flags & 0x02 != 0 {
                         self.ended = true;
-                        let (code, message, details, _metadata) = crate::protocol::decode_end_stream(&payload);
+                        let (code, message, details, metadata) = crate::protocol::decode_end_stream(&payload);
+                        if !metadata.is_empty() { self.trailers = metadata; }
                         if code != 0 { self.err = Some(RPCError { code, message, details }); }
                         return None;
                     }
@@ -198,6 +208,7 @@ impl Stream for HyperStream {
         }
     }
     fn last_error(&self) -> Option<RPCError> { self.err.clone() }
+    fn trailers(&self) -> crate::protocol::Headers { self.trailers.clone() }
     fn cancel(&mut self) {}
     fn close(&mut self) {}
 }

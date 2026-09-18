@@ -12,5 +12,9 @@ pub fn method_specs() -> Vec<crate::protocol::MethodSpec> {
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "StreamFailDetails".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/StreamFailDetails".to_string(), client_stream: false, server_stream: true },
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "EchoTrailer".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/EchoTrailer".to_string(), client_stream: false, server_stream: false },
   crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "CountTrailer".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/CountTrailer".to_string(), client_stream: false, server_stream: true },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "EchoBytes".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/EchoBytes".to_string(), client_stream: false, server_stream: false },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Sleep".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/Sleep".to_string(), client_stream: false, server_stream: false },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "Empty".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/Empty".to_string(), client_stream: false, server_stream: false },
+  crate::protocol::MethodSpec { service: "easyrpc.conformance.v1.ConformanceService".to_string(), name: "BigStream".to_string(), path: "/easyrpc.conformance.v1.ConformanceService/BigStream".to_string(), client_stream: false, server_stream: true },
   ]
 }

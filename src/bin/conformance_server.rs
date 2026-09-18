@@ -113,12 +113,61 @@ fn build_registry() -> ServerRegistry {
     );
 
     unary.insert(
+        "EchoBytes".to_string(),
+        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: EchoBytesRequest = decode(&req).map_err(internal)?;
+            Ok(encode(&EchoBytesResponse { data: m.data }).to_vec())
+        }) as UnaryHandler,
+    );
+
+    unary.insert(
+        "Sleep".to_string(),
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: SleepRequest = decode(&req).map_err(internal)?;
+            // Honor the Connect deadline (M12/M13).
+            let timeout: i32 = ctx
+                .headers
+                .get("connect-timeout-ms")
+                .and_then(|v| v.first())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            if timeout > 0 && timeout < m.millis {
+                std::thread::sleep(std::time::Duration::from_millis(timeout as u64));
+                return Err(RPCError::new(4, "deadline exceeded"));
+            }
+            if m.millis > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(m.millis as u64));
+            }
+            Ok(encode(&SleepResponse { ok: true }).to_vec())
+        }) as UnaryHandler,
+    );
+
+    unary.insert(
+        "Empty".to_string(),
+        Box::new(|_req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            Ok(encode(&EmptyResponse {}).to_vec())
+        }) as UnaryHandler,
+    );
+
+    unary.insert(
         "EchoTrailer".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
             let m: EchoTrailerRequest = decode(&req).map_err(internal)?;
             ctx.set_trailer("x-trl", &format!("unary-{}", m.input));
             Ok(encode(&EchoTrailerResponse { output: format!("trailer:{}", m.input) }).to_vec())
         }) as UnaryHandler,
+    );
+
+    stream.insert(
+        "BigStream".to_string(),
+        Box::new(|req: Vec<u8>, _ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
+            let m: BigStreamRequest = decode(&req).map_err(internal)?;
+            let n = if m.count > 0 { m.count } else { 3 };
+            for i in 0..n {
+                let _ = emit(encode(&BigStreamResponse { index: i, size: m.size }).to_vec());
+            }
+            Ok(())
+        }) as StreamHandler,
     );
 
     stream.insert(
