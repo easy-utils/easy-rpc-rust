@@ -31,11 +31,21 @@ impl Transport for HyperClient {
         });
         let target = origin_form(&req.url);
         let body = Full::new(req.body.unwrap_or_default());
-        let hreq = HReq::builder()
+        let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
+        let mut builder = HReq::builder()
             .method(req.method.as_str())
             .uri(target.as_str())
-            .header("host", host_of(&req.url))
-            .header("content-type", "application/proto")
+            .header("host", host_of(&req.url));
+        // Caller-supplied headers first; default content-type ONLY when absent.
+        for (k, vs) in req.headers.iter() {
+            for v in vs {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+        }
+        if !has_ct {
+            builder = builder.header("content-type", "application/proto");
+        }
+        let hreq = builder
             .body(body)
             .map_err(|e| err_box(e.to_string()))?;
         let res = sender.send_request(hreq).await.map_err(|e| err_box(e.to_string()))?;
@@ -78,11 +88,21 @@ impl Transport for HyperClient {
         });
         let target = origin_form(&req.url);
         let body = Full::new(req.body.unwrap_or_default());
-        let hreq = HReq::builder()
+        let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
+        let mut builder = HReq::builder()
             .method(req.method.as_str())
             .uri(target.as_str())
-            .header("host", host_of(&req.url))
-            .header("content-type", "application/proto")
+            .header("host", host_of(&req.url));
+        // Caller-supplied headers first; default content-type ONLY when absent.
+        for (k, vs) in req.headers.iter() {
+            for v in vs {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+        }
+        if !has_ct {
+            builder = builder.header("content-type", "application/connect+proto");
+        }
+        let hreq = builder
             .body(body)
             .map_err(|e| err_box(e.to_string()))?;
         let res = sender.send_request(hreq).await.map_err(|e| err_box(e.to_string()))?;

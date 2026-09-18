@@ -92,12 +92,16 @@ async fn send_with(client: &Client, base: &str, req: Request) -> Result<Response
     let url = join(base, &req.url);
     let method = Method::from_bytes(req.method.as_bytes()).map_err(|e| err_box(e.to_string()))?;
     let mut rb = client.request(method, url);
+    // Caller-supplied headers first; default content-type ONLY when absent.
+    let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
     for (k, vs) in req.headers.clone() {
         for v in vs {
             rb = rb.header(k.clone(), v);
         }
     }
-    rb = rb.header("content-type", "application/proto");
+    if !has_ct {
+        rb = rb.header("content-type", "application/proto");
+    }
     let resp = rb.body(req.body.clone().unwrap_or_default()).send().await.map_err(|e| err_box(e.to_string()))?;
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
@@ -123,12 +127,16 @@ async fn open_stream_with(client: &Client, base: &str, req: Request) -> Result<B
     let url = join(base, &req.url);
     let method = Method::from_bytes(req.method.as_bytes()).map_err(|e| err_box(e.to_string()))?;
     let mut rb = client.request(method, url);
+    // Caller-supplied headers first; default content-type ONLY when absent.
+    let has_ct = req.headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
     for (k, vs) in req.headers.clone() {
         for v in vs {
             rb = rb.header(k.clone(), v);
         }
     }
-    rb = rb.header("content-type", "application/connect+proto");
+    if !has_ct {
+        rb = rb.header("content-type", "application/connect+proto");
+    }
     let resp = rb.body(req.body.clone().unwrap_or_default()).send().await.map_err(|e| err_box(e.to_string()))?;
     if resp.status().as_u16() >= 300 {
         return Err(RPCError { code: connect_from_status(resp.status().as_u16()), message: "http error".to_string(), ..Default::default() });
