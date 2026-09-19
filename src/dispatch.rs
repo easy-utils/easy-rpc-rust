@@ -163,10 +163,13 @@ pub async fn handle(
             if !applied_flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 let mut base = Headers::new();
                 base.insert("content-type".to_string(), vec![content_type_for(true, kind).to_string()]);
+                if wants_gzip {
+                    base.insert("connect-content-encoding".to_string(), vec![ENCODING_GZIP.to_string()]);
+                }
                 wc.header(merge_response_headers(base, &ctxc.response_headers()));
             }
             if wants_gzip && p.len() >= COMPRESS_MIN_BYTES {
-                return wc.write_frame(frame_compressed(&gzip_compress(&p)));
+                return wc.write_frame(frame_compressed(&p));
             }
             wc.write_frame(frame(&p, false))
         });
@@ -175,6 +178,9 @@ pub async fn handle(
         if !applied.load(std::sync::atomic::Ordering::SeqCst) {
             let mut base = Headers::new();
             base.insert("content-type".to_string(), vec![content_type_for(true, kind).to_string()]);
+            if wants_gzip {
+                base.insert("connect-content-encoding".to_string(), vec![ENCODING_GZIP.to_string()]);
+            }
             w.header(merge_response_headers(base, &ctx.response_headers()));
         }
         if ended.load(std::sync::atomic::Ordering::SeqCst) {

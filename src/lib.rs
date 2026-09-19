@@ -1,3 +1,4 @@
+pub mod descriptor_pool;
 pub mod protocol;
 pub mod interceptors;
 pub mod bridge_hyper;

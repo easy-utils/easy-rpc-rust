@@ -18,7 +18,7 @@ version = "0.1.0"
 edition = "2021"
 [build-dependencies]
 prost-build = "0.13"
-pbjson-build = "0.9"
+pbjson-build = "0.7"
 TOML
 [ -f "$GEN/src/main.rs" ] || echo 'fn main(){}' > "$GEN/src/main.rs"
 cat > "$GEN/build.rs" <<'RS'

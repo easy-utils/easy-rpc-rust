@@ -50,10 +50,10 @@ fn build_registry() -> ServerRegistry {
     use easy_rpc::server::{StreamHandler, UnaryHandler};
 
     // Codec-aware helpers: handlers decode/encode by the request's ContentKind.
-    fn dec<M: prost::Message + Default + serde::de::DeserializeOwned>(b: &[u8], k: ContentKind) -> Result<M, RPCError> {
+    fn dec<M: prost::Message + Default + prost::Name>(b: &[u8], k: ContentKind) -> Result<M, RPCError> {
         decode_msg(b, k)
     }
-    fn enc<M: prost::Message + serde::Serialize>(m: &M, k: ContentKind) -> Vec<u8> {
+    fn enc<M: prost::Message + prost::Name>(m: &M, k: ContentKind) -> Vec<u8> {
         encode_msg(m, k).unwrap_or_default()
     }
 

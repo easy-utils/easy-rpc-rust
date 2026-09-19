@@ -487,21 +487,47 @@ pub fn content_type_for(server_stream: bool, kind: ContentKind) -> &'static str 
     }
 }
 
-/// Encode a prost message in the given codec.
-pub fn encode_msg<M: prost::Message + serde::Serialize>(m: &M, kind: ContentKind) -> Result<Vec<u8>, RPCError> {
+/// Encode a prost message in the given codec. JSON goes through prost-reflect
+/// so proto3 `Any` (`@type`), bytes base64, int64-as-string, and field-name
+/// rules are correct.
+pub fn encode_msg<M>(m: &M, kind: ContentKind) -> Result<Vec<u8>, RPCError>
+where
+    M: prost::Message + prost::Name,
+{
     match kind {
         ContentKind::Proto => Ok(m.encode_to_vec()),
-        ContentKind::Json => serde_json::to_vec(m).map_err(|e| RPCError::new(13, format!("json encode: {e}"))),
+        ContentKind::Json => {
+            let desc = crate::descriptor_pool::descriptor_for(&M::full_name())
+                .ok_or_else(|| RPCError::new(13, format!("no descriptor for {}", M::full_name())))?;
+            let dynamic = prost_reflect::DynamicMessage::decode(desc, m.encode_to_vec().as_slice())
+                .map_err(|e| RPCError::new(13, format!("json encode: {e}")))?;
+            let mut out = Vec::new();
+            dynamic
+                .serialize_with_options(&mut serde_json::Serializer::new(&mut out), &prost_reflect::SerializeOptions::default())
+                .map_err(|e| RPCError::new(13, format!("json encode: {e}")))?;
+            Ok(out)
+        }
     }
 }
 
 /// Decode bytes into a prost message in the given codec. JSON ignores unknown
 /// fields (matching Connect / protojson's DiscardUnknown).
-pub fn decode_msg<M: prost::Message + Default + serde::de::DeserializeOwned>(bytes: &[u8], kind: ContentKind) -> Result<M, RPCError> {
+pub fn decode_msg<M>(bytes: &[u8], kind: ContentKind) -> Result<M, RPCError>
+where
+    M: prost::Message + Default + prost::Name,
+{
     match kind {
         ContentKind::Proto => M::decode(bytes).map_err(|e| RPCError::new(13, format!("proto decode: {e}"))),
-        // pbjson's generated Deserialize ignores unknown fields.
-        ContentKind::Json => serde_json::from_slice(bytes).map_err(|e| RPCError::new(13, format!("json decode: {e}"))),
+        ContentKind::Json => {
+            let desc = crate::descriptor_pool::descriptor_for(&M::full_name())
+                .ok_or_else(|| RPCError::new(13, format!("no descriptor for {}", M::full_name())))?;
+            let mut de = serde_json::Deserializer::from_slice(bytes);
+            let opts = prost_reflect::DeserializeOptions::new().deny_unknown_fields(false);
+            let dynamic = prost_reflect::DynamicMessage::deserialize_with_options(desc, &mut de, &opts)
+                .map_err(|e| RPCError::new(13, format!("json decode: {e}")))?;
+            M::decode(dynamic.encode_to_vec().as_slice())
+                .map_err(|e| RPCError::new(13, format!("json decode: {e}")))
+        }
     }
 }
 

@@ -4,33 +4,103 @@ pub struct EchoRequest {
     #[prost(string, tag = "1")]
     pub input: ::prost::alloc::string::String,
 }
+impl ::prost::Name for EchoRequest {
+    const NAME: &'static str = "EchoRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoRequest".into()
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoResponse {
     #[prost(string, tag = "1")]
     pub output: ::prost::alloc::string::String,
+}
+impl ::prost::Name for EchoResponse {
+    const NAME: &'static str = "EchoResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoResponse".into()
+    }
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CountRequest {
     #[prost(int32, tag = "1")]
     pub count: i32,
 }
+impl ::prost::Name for CountRequest {
+    const NAME: &'static str = "CountRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.CountRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.CountRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CountResponse {
     #[prost(int32, tag = "1")]
     pub index: i32,
+}
+impl ::prost::Name for CountResponse {
+    const NAME: &'static str = "CountResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.CountResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.CountResponse".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FailRequest {
     #[prost(string, tag = "1")]
     pub message: ::prost::alloc::string::String,
 }
+impl ::prost::Name for FailRequest {
+    const NAME: &'static str = "FailRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.FailRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.FailRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct FailResponse {
     #[prost(bool, tag = "1")]
     pub ok: bool,
 }
+impl ::prost::Name for FailResponse {
+    const NAME: &'static str = "FailResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.FailResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.FailResponse".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct HealthRequest {}
+impl ::prost::Name for HealthRequest {
+    const NAME: &'static str = "HealthRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.HealthRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.HealthRequest".into()
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HealthResponse {
     #[prost(bool, tag = "1")]
@@ -38,30 +108,100 @@ pub struct HealthResponse {
     #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
+impl ::prost::Name for HealthResponse {
+    const NAME: &'static str = "HealthResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.HealthResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.HealthResponse".into()
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoBytesRequest {
     #[prost(bytes = "vec", tag = "1")]
     pub data: ::prost::alloc::vec::Vec<u8>,
+}
+impl ::prost::Name for EchoBytesRequest {
+    const NAME: &'static str = "EchoBytesRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoBytesRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoBytesRequest".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoBytesResponse {
     #[prost(bytes = "vec", tag = "1")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+impl ::prost::Name for EchoBytesResponse {
+    const NAME: &'static str = "EchoBytesResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoBytesResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoBytesResponse".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct SleepRequest {
     #[prost(int32, tag = "1")]
     pub millis: i32,
+}
+impl ::prost::Name for SleepRequest {
+    const NAME: &'static str = "SleepRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.SleepRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.SleepRequest".into()
+    }
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct SleepResponse {
     #[prost(bool, tag = "1")]
     pub ok: bool,
 }
+impl ::prost::Name for SleepResponse {
+    const NAME: &'static str = "SleepResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.SleepResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.SleepResponse".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct EmptyRequest {}
+impl ::prost::Name for EmptyRequest {
+    const NAME: &'static str = "EmptyRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EmptyRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EmptyRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct EmptyResponse {}
+impl ::prost::Name for EmptyResponse {
+    const NAME: &'static str = "EmptyResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EmptyResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EmptyResponse".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BigStreamRequest {
     #[prost(int32, tag = "1")]
@@ -69,12 +209,32 @@ pub struct BigStreamRequest {
     #[prost(int32, tag = "2")]
     pub size: i32,
 }
+impl ::prost::Name for BigStreamRequest {
+    const NAME: &'static str = "BigStreamRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.BigStreamRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.BigStreamRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BigStreamResponse {
     #[prost(int32, tag = "1")]
     pub index: i32,
     #[prost(int32, tag = "2")]
     pub size: i32,
+}
+impl ::prost::Name for BigStreamResponse {
+    const NAME: &'static str = "BigStreamResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.BigStreamResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.BigStreamResponse".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StreamFailRequest {
@@ -86,15 +246,45 @@ pub struct StreamFailRequest {
     #[prost(string, tag = "3")]
     pub message: ::prost::alloc::string::String,
 }
+impl ::prost::Name for StreamFailRequest {
+    const NAME: &'static str = "StreamFailRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.StreamFailRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.StreamFailRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct StreamFailResponse {
     #[prost(int32, tag = "1")]
     pub index: i32,
 }
+impl ::prost::Name for StreamFailResponse {
+    const NAME: &'static str = "StreamFailResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.StreamFailResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.StreamFailResponse".into()
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoMetaRequest {
     #[prost(string, tag = "1")]
     pub input: ::prost::alloc::string::String,
+}
+impl ::prost::Name for EchoMetaRequest {
+    const NAME: &'static str = "EchoMetaRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoMetaRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoMetaRequest".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoMetaResponse {
@@ -107,15 +297,45 @@ pub struct EchoMetaResponse {
         ::prost::alloc::string::String,
     >,
 }
+impl ::prost::Name for EchoMetaResponse {
+    const NAME: &'static str = "EchoMetaResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoMetaResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoMetaResponse".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BigRequest {
     #[prost(int32, tag = "1")]
     pub size: i32,
 }
+impl ::prost::Name for BigRequest {
+    const NAME: &'static str = "BigRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.BigRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.BigRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BigResponse {
     #[prost(int32, tag = "2")]
     pub size: i32,
+}
+impl ::prost::Name for BigResponse {
+    const NAME: &'static str = "BigResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.BigResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.BigResponse".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FailDetailsRequest {
@@ -130,10 +350,30 @@ pub struct FailDetailsRequest {
     #[prost(string, tag = "4")]
     pub detail_text: ::prost::alloc::string::String,
 }
+impl ::prost::Name for FailDetailsRequest {
+    const NAME: &'static str = "FailDetailsRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.FailDetailsRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.FailDetailsRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct FailDetailsResponse {
     #[prost(bool, tag = "1")]
     pub ok: bool,
+}
+impl ::prost::Name for FailDetailsResponse {
+    const NAME: &'static str = "FailDetailsResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.FailDetailsResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.FailDetailsResponse".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StreamFailDetailsRequest {
@@ -148,28 +388,88 @@ pub struct StreamFailDetailsRequest {
     #[prost(string, tag = "5")]
     pub detail_text: ::prost::alloc::string::String,
 }
+impl ::prost::Name for StreamFailDetailsRequest {
+    const NAME: &'static str = "StreamFailDetailsRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.StreamFailDetailsRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.StreamFailDetailsRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct StreamFailDetailsResponse {
     #[prost(int32, tag = "1")]
     pub index: i32,
+}
+impl ::prost::Name for StreamFailDetailsResponse {
+    const NAME: &'static str = "StreamFailDetailsResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.StreamFailDetailsResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.StreamFailDetailsResponse".into()
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoTrailerRequest {
     #[prost(string, tag = "1")]
     pub input: ::prost::alloc::string::String,
 }
+impl ::prost::Name for EchoTrailerRequest {
+    const NAME: &'static str = "EchoTrailerRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoTrailerRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoTrailerRequest".into()
+    }
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EchoTrailerResponse {
     #[prost(string, tag = "1")]
     pub output: ::prost::alloc::string::String,
+}
+impl ::prost::Name for EchoTrailerResponse {
+    const NAME: &'static str = "EchoTrailerResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.EchoTrailerResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.EchoTrailerResponse".into()
+    }
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CountTrailerRequest {
     #[prost(int32, tag = "1")]
     pub count: i32,
 }
+impl ::prost::Name for CountTrailerRequest {
+    const NAME: &'static str = "CountTrailerRequest";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.CountTrailerRequest".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.CountTrailerRequest".into()
+    }
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CountTrailerResponse {
     #[prost(int32, tag = "1")]
     pub index: i32,
+}
+impl ::prost::Name for CountTrailerResponse {
+    const NAME: &'static str = "CountTrailerResponse";
+    const PACKAGE: &'static str = "easyrpc.conformance.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "easyrpc.conformance.v1.CountTrailerResponse".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/easyrpc.conformance.v1.CountTrailerResponse".into()
+    }
 }

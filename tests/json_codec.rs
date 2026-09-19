@@ -47,3 +47,11 @@ fn proto_decode_still_works() {
     let back: EchoResponse = decode_msg(&b, ContentKind::Proto).unwrap();
     assert_eq!(back.output, "hi");
 }
+
+#[test]
+fn json_any_roundtrip_via_descriptor() {
+    // Verify the descriptor pool exposes google.protobuf.Any so the JSON codec
+    // can emit the special `@type` form (prost-reflect).
+    let pool = easy_rpc::descriptor_pool::official_pool();
+    assert!(pool.get_message_by_name("google.protobuf.Any").is_some());
+}

@@ -7,7 +7,7 @@ use easy_rpc::connectrpc::conformance::v1::*;
 use easy_rpc::connectrpc::conformance::v1::conformance_payload::RequestInfo as ConformancePayloadRequestInfo;
 use easy_rpc::connectrpc::conformance::v1::Error as ConfError;
 use easy_rpc::connectrpc::conformance::v1::method_specs;
-use easy_rpc::protocol::{ErrorDetail, HandlerContext, RPCError};
+use easy_rpc::protocol::{decode_msg, encode_msg, ContentKind, ErrorDetail, HandlerContext, RPCError};
 use easy_rpc::server::{hyper_serve, ServerRegistry, StreamHandler, UnaryHandler};
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -81,7 +81,7 @@ const HEADER_TIMEOUT: &str = "connect-timeout-ms";
 fn request_any<M: Message>(msg: &M, name: &str) -> prost_types::Any {
     prost_types::Any {
         type_url: format!("type.googleapis.com/connectrpc.conformance.v1.{name}"),
-        value: msg.encode_to_vec(),
+        value: msg.encode_to_vec().into(),
     }
 }
 
@@ -107,7 +107,7 @@ fn to_rpc_error(e: &ConfError, info: Option<ConformancePayloadRequestInfo>) -> R
         .iter()
         .map(|a| {
             let bare = a.type_url.rsplit('/').next().unwrap_or("").to_string();
-            ErrorDetail { type_: bare, value: a.value.clone() }
+            ErrorDetail { type_: bare, value: a.value.to_vec() }
         })
         .collect();
     if let Some(i) = info {
@@ -142,11 +142,11 @@ fn build_registry() -> ServerRegistry {
     unary.insert(
         "Unary".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m = UnaryRequest::decode(&req[..]).map_err(internal)?;
+            let m: UnaryRequest = decode_msg(&req, ctx.kind).map_err(internal)?;
             let info = make_request_info(&ctx.headers, vec![request_any(&m, "UnaryRequest")]);
             let def = match m.response_definition {
                 Some(d) => d,
-                None => return Ok(UnaryResponse { payload: Some(payload(None, Some(info))) }.encode_to_vec()),
+                None => return Ok(encode_msg(&UnaryResponse { payload: Some(payload(None, Some(info))) }, ctx.kind).unwrap_or_default()),
             };
             apply_headers(&def.response_headers, ctx, false);
             apply_headers(&def.response_trailers, ctx, true);
@@ -160,7 +160,7 @@ fn build_registry() -> ServerRegistry {
                         Some(unary_response_definition::Response::ResponseData(d)) => d,
                         _ => Vec::new(),
                     };
-                    Ok(UnaryResponse { payload: Some(payload(Some(data), Some(info))) }.encode_to_vec())
+                    Ok(encode_msg(&UnaryResponse { payload: Some(payload(Some(data), Some(info))) }, ctx.kind).unwrap_or_default())
                 }
             }
         }) as UnaryHandler,
@@ -169,9 +169,9 @@ fn build_registry() -> ServerRegistry {
     unary.insert(
         "IdempotentUnary".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m = IdempotentUnaryRequest::decode(&req[..]).map_err(internal)?;
+            let m: IdempotentUnaryRequest = decode_msg(&req, ctx.kind).map_err(internal)?;
             let info = make_request_info(&ctx.headers, vec![request_any(&m, "IdempotentUnaryRequest")]);
-            Ok(IdempotentUnaryResponse { payload: Some(payload(None, Some(info))) }.encode_to_vec())
+            Ok(encode_msg(&IdempotentUnaryResponse { payload: Some(payload(None, Some(info))) }, ctx.kind).unwrap_or_default())
         }) as UnaryHandler,
     );
 
@@ -196,7 +196,7 @@ fn build_registry() -> ServerRegistry {
              ctx: &HandlerContext,
              emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>|
              -> Result<(), RPCError> {
-                let m = ServerStreamRequest::decode(&req[..]).map_err(internal)?;
+                let m: ServerStreamRequest = decode_msg(&req, ctx.kind).map_err(internal)?;
                 let info = make_request_info(&ctx.headers, vec![request_any(&m, "ServerStreamRequest")]);
                 let def = match m.response_definition {
                     Some(d) => d,
@@ -211,7 +211,7 @@ fn build_registry() -> ServerRegistry {
                     }
                     let info_here = if first { Some(info.clone()) } else { None };
                     let resp = ServerStreamResponse { payload: Some(payload(Some(data.clone()), info_here)) };
-                    emit(resp.encode_to_vec())?;
+                    emit(encode_msg(&resp, ctx.kind).unwrap_or_default())?;
                     first = false;
                 }
                 if let Some(e) = &def.error {
@@ -239,6 +239,6 @@ fn payload(data: Option<Vec<u8>>, info: Option<ConformancePayloadRequestInfo>) -
     ConformancePayload { data: data.unwrap_or_default(), request_info: info }
 }
 
-fn internal(e: prost::DecodeError) -> RPCError {
-    RPCError::new(13, e.to_string())
+fn internal(e: RPCError) -> RPCError {
+    e
 }
