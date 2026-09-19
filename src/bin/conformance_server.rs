@@ -46,33 +46,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn build_registry() -> ServerRegistry {
     use easy_rpc::easyrpc::conformance::v1::*;
-    use easy_rpc::protocol::{decode, encode, ErrorDetail, RPCError};
+    use easy_rpc::protocol::{decode_msg, encode_msg, ContentKind, ErrorDetail, RPCError};
     use easy_rpc::server::{StreamHandler, UnaryHandler};
+
+    // Codec-aware helpers: handlers decode/encode by the request's ContentKind.
+    fn dec<M: prost::Message + Default + serde::de::DeserializeOwned>(b: &[u8], k: ContentKind) -> Result<M, RPCError> {
+        decode_msg(b, k)
+    }
+    fn enc<M: prost::Message + serde::Serialize>(m: &M, k: ContentKind) -> Vec<u8> {
+        encode_msg(m, k).unwrap_or_default()
+    }
 
     let mut unary = std::collections::HashMap::new();
     let mut stream = std::collections::HashMap::new();
 
     unary.insert(
         "Health".to_string(),
-        Box::new(|_req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            Ok(encode(&HealthResponse { ok: true, name: "conformance".to_string() }).to_vec())
+        Box::new(|_req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            Ok(enc(&HealthResponse { ok: true, name: "conformance".to_string() }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "Echo".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: EchoRequest = decode(&req).map_err(internal)?;
-            Ok(encode(&EchoResponse { output: format!("echo:{}", m.input) }).to_vec())
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: EchoRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
+            Ok(enc(&EchoResponse { output: format!("echo:{}", m.input) }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "Fail".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: FailRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: FailRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             if m.message.is_empty() {
-                Ok(encode(&FailResponse { ok: true }).to_vec())
+                Ok(enc(&FailResponse { ok: true }, ctx.kind))
             } else {
                 Err(RPCError::new(3, m.message))
             }
@@ -81,8 +89,8 @@ fn build_registry() -> ServerRegistry {
 
     unary.insert(
         "FailDetails".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: FailDetailsRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: FailDetailsRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             Err(RPCError::new(m.code, m.message).with_details(vec![ErrorDetail {
                 type_: m.detail_type,
                 value: m.detail_text.into_bytes(),
@@ -93,37 +101,37 @@ fn build_registry() -> ServerRegistry {
     unary.insert(
         "EchoMeta".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: EchoMetaRequest = decode(&req).map_err(internal)?;
+            let m: EchoMetaRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             let mut meta = std::collections::HashMap::new();
             for k in ["x-test", "authorization"] {
                 if let Some(v) = ctx.headers.get(k).and_then(|x| x.first()) {
                     meta.insert(k.to_string(), v.clone());
                 }
             }
-            Ok(encode(&EchoMetaResponse { input: m.input, meta }).to_vec())
+            Ok(enc(&EchoMetaResponse { input: m.input, meta }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "Big".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: BigRequest = decode(&req).map_err(internal)?;
-            Ok(encode(&BigResponse { size: m.size }).to_vec())
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: BigRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
+            Ok(enc(&BigResponse { size: m.size }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "EchoBytes".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: EchoBytesRequest = decode(&req).map_err(internal)?;
-            Ok(encode(&EchoBytesResponse { data: m.data }).to_vec())
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            let m: EchoBytesRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
+            Ok(enc(&EchoBytesResponse { data: m.data }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "Sleep".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: SleepRequest = decode(&req).map_err(internal)?;
+            let m: SleepRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             // Honor the Connect deadline (M12/M13).
             let timeout: i32 = ctx
                 .headers
@@ -138,33 +146,33 @@ fn build_registry() -> ServerRegistry {
             if m.millis > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(m.millis as u64));
             }
-            Ok(encode(&SleepResponse { ok: true }).to_vec())
+            Ok(enc(&SleepResponse { ok: true }, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "Empty".to_string(),
-        Box::new(|_req: Vec<u8>, _ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            Ok(encode(&EmptyResponse {}).to_vec())
+        Box::new(|_req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
+            Ok(enc(&EmptyResponse {}, ctx.kind))
         }) as UnaryHandler,
     );
 
     unary.insert(
         "EchoTrailer".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext| -> Result<Vec<u8>, RPCError> {
-            let m: EchoTrailerRequest = decode(&req).map_err(internal)?;
+            let m: EchoTrailerRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             ctx.set_trailer("x-trl", &format!("unary-{}", m.input));
-            Ok(encode(&EchoTrailerResponse { output: format!("trailer:{}", m.input) }).to_vec())
+            Ok(enc(&EchoTrailerResponse { output: format!("trailer:{}", m.input) }, ctx.kind))
         }) as UnaryHandler,
     );
 
     stream.insert(
         "BigStream".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
-            let m: BigStreamRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
+            let m: BigStreamRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             let n = if m.count > 0 { m.count } else { 3 };
             for i in 0..n {
-                let _ = emit(encode(&BigStreamResponse { index: i, size: m.size }).to_vec());
+                let _ = emit(enc(&BigStreamResponse { index: i, size: m.size }, ctx.kind));
             }
             Ok(())
         }) as StreamHandler,
@@ -172,11 +180,11 @@ fn build_registry() -> ServerRegistry {
 
     stream.insert(
         "Count".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
-            let m: CountRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
+            let m: CountRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             let n = if m.count > 0 { m.count } else { 3 };
             for i in 0..n {
-                let _ = emit(encode(&CountResponse { index: i }).to_vec());
+                let _ = emit(enc(&CountResponse { index: i }, ctx.kind));
             }
             Ok(())
         }) as StreamHandler,
@@ -184,10 +192,10 @@ fn build_registry() -> ServerRegistry {
 
     stream.insert(
         "StreamFail".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
-            let m: StreamFailRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
+            let m: StreamFailRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             for i in 0..m.emit_before {
-                let _ = emit(encode(&StreamFailResponse { index: i }).to_vec());
+                let _ = emit(enc(&StreamFailResponse { index: i }, ctx.kind));
             }
             Err(RPCError::new(m.code, m.message))
         }) as StreamHandler,
@@ -195,10 +203,10 @@ fn build_registry() -> ServerRegistry {
 
     stream.insert(
         "StreamFailDetails".to_string(),
-        Box::new(|req: Vec<u8>, _ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
-            let m: StreamFailDetailsRequest = decode(&req).map_err(internal)?;
+        Box::new(|req: Vec<u8>, ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
+            let m: StreamFailDetailsRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             for i in 0..m.emit_before {
-                let _ = emit(encode(&StreamFailDetailsResponse { index: i }).to_vec());
+                let _ = emit(enc(&StreamFailDetailsResponse { index: i }, ctx.kind));
             }
             Err(RPCError::new(m.code, m.message).with_details(vec![ErrorDetail {
                 type_: m.detail_type,
@@ -210,11 +218,11 @@ fn build_registry() -> ServerRegistry {
     stream.insert(
         "CountTrailer".to_string(),
         Box::new(|req: Vec<u8>, ctx: &HandlerContext, emit: Box<dyn Fn(Vec<u8>) -> Result<(), RPCError> + Send + Sync>| -> Result<(), RPCError> {
-            let m: CountTrailerRequest = decode(&req).map_err(internal)?;
+            let m: CountTrailerRequest = dec(&req, ctx.kind).map_err(rpc_internal)?;
             ctx.set_trailer("x-ctrailer", "done");
             let n = if m.count > 0 { m.count } else { 3 };
             for i in 0..n {
-                let _ = emit(encode(&CountTrailerResponse { index: i }).to_vec());
+                let _ = emit(enc(&CountTrailerResponse { index: i }, ctx.kind));
             }
             Ok(())
         }) as StreamHandler,
@@ -223,6 +231,6 @@ fn build_registry() -> ServerRegistry {
     ServerRegistry { unary, stream }
 }
 
-fn internal(e: std::io::Error) -> easy_rpc::protocol::RPCError {
-    easy_rpc::protocol::RPCError::new(13, e.to_string())
+fn rpc_internal(e: easy_rpc::protocol::RPCError) -> easy_rpc::protocol::RPCError {
+    e
 }

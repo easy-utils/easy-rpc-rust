@@ -442,9 +442,68 @@ pub fn decode<M: Message + Default>(b: &[u8]) -> Result<M, std::io::Error> {
 /// Trailer prefix for unary trailing metadata on response headers.
 pub const TRAILER_PREFIX: &str = "trailer-";
 
-/// Proto-only content types.
+/// Content types, by shape and codec.
 pub const CONTENT_TYPE_UNARY: &str = "application/proto";
 pub const CONTENT_TYPE_STREAM: &str = "application/connect+proto";
+pub const CONTENT_TYPE_UNARY_JSON: &str = "application/json";
+pub const CONTENT_TYPE_STREAM_JSON: &str = "application/connect+json";
+
+/// Message codec: proto binary (default) or proto3 JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentKind {
+    Proto,
+    Json,
+}
+
+impl Default for ContentKind {
+    fn default() -> Self {
+        ContentKind::Proto
+    }
+}
+
+/// Map a Content-Type to a codec, or None when unsupported.
+pub fn content_kind_of(content_type: &str) -> Option<ContentKind> {
+    let ct = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
+    match ct.as_str() {
+        "application/proto" | "application/connect+proto" => Some(ContentKind::Proto),
+        "application/json" | "application/connect+json" => Some(ContentKind::Json),
+        _ => None,
+    }
+}
+
+/// True when the content type denotes the streaming shape.
+pub fn is_stream_content_type(content_type: &str) -> bool {
+    let ct = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
+    ct == "application/connect+proto" || ct == "application/connect+json"
+}
+
+/// The response Content-Type for a shape + codec.
+pub fn content_type_for(server_stream: bool, kind: ContentKind) -> &'static str {
+    match (server_stream, kind) {
+        (true, ContentKind::Json) => CONTENT_TYPE_STREAM_JSON,
+        (false, ContentKind::Json) => CONTENT_TYPE_UNARY_JSON,
+        (true, ContentKind::Proto) => CONTENT_TYPE_STREAM,
+        (false, ContentKind::Proto) => CONTENT_TYPE_UNARY,
+    }
+}
+
+/// Encode a prost message in the given codec.
+pub fn encode_msg<M: prost::Message + serde::Serialize>(m: &M, kind: ContentKind) -> Result<Vec<u8>, RPCError> {
+    match kind {
+        ContentKind::Proto => Ok(m.encode_to_vec()),
+        ContentKind::Json => serde_json::to_vec(m).map_err(|e| RPCError::new(13, format!("json encode: {e}"))),
+    }
+}
+
+/// Decode bytes into a prost message in the given codec. JSON ignores unknown
+/// fields (matching Connect / protojson's DiscardUnknown).
+pub fn decode_msg<M: prost::Message + Default + serde::de::DeserializeOwned>(bytes: &[u8], kind: ContentKind) -> Result<M, RPCError> {
+    match kind {
+        ContentKind::Proto => M::decode(bytes).map_err(|e| RPCError::new(13, format!("proto decode: {e}"))),
+        // pbjson's generated Deserialize ignores unknown fields.
+        ContentKind::Json => serde_json::from_slice(bytes).map_err(|e| RPCError::new(13, format!("json decode: {e}"))),
+    }
+}
 
 /// Merge trailing metadata into response headers (`trailer-<key>`).
 pub fn mux_trailers(headers: &Headers, trailers: &Headers) -> Headers {
@@ -483,6 +542,9 @@ pub fn read_single_frame(body: &[u8]) -> Result<Vec<u8>, RPCError> {
 #[derive(Debug, Default, Clone)]
 pub struct HandlerContext {
     pub headers: Headers,
+    /// Message codec the request arrived with; generated handlers decode/encode
+    /// messages accordingly.
+    pub kind: ContentKind,
     trailers_internal: std::sync::Arc<std::sync::Mutex<Headers>>,
     headers_internal: std::sync::Arc<std::sync::Mutex<Headers>>,
 }
@@ -491,6 +553,7 @@ impl HandlerContext {
     pub fn new(headers: Headers) -> Self {
         Self {
             headers,
+            kind: ContentKind::Proto,
             trailers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())),
             headers_internal: std::sync::Arc::new(std::sync::Mutex::new(Headers::new())),
         }
